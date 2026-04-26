@@ -37,6 +37,12 @@ signals:
 python tools/exploratory/key_census.py --match todo --match chat --match agent --match terminal --only-signal --limit 80
 ```
 
+To inspect nested structure without printing raw values or dynamic session ids:
+
+```powershell
+python tools/exploratory/key_census.py --shape --match memento/chat-todo-list --match agentSessions --match chat.terminalSessions --limit 20
+```
+
 ## What To Look For
 
 Prioritize keys that are frequent or high-signal:

@@ -29,6 +29,7 @@ COMMAND_RE = re.compile(r"(?im)^\s*(?:[-*]\s*)?`?(?:python|py|git|rg|grep|find|G
 ERROR_RE = re.compile(r"(?i)\b(error|exception|traceback|failed|failure|denied|missing|timeout|out of memory|heap)\b")
 TODO_RE = re.compile(r"(?i)\b(todo|next|follow-up|decision|roadmap|blocked|issue|planned)\b")
 TIMESTAMP_RE = re.compile(r"\b\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}")
+UUID_RE = re.compile(r"(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 
 
 def decode_value(value):
@@ -72,6 +73,42 @@ def shape_of(value):
         return "list"
     if isinstance(value, bytes):
         return "bytes"
+    return type(value).__name__
+
+
+def structural_shape(value, depth=0, max_depth=4):
+    if depth >= max_depth:
+        return type(value).__name__
+    if isinstance(value, dict):
+        out = {}
+        uuid_items = [(key, item) for key, item in value.items() if UUID_RE.match(str(key))]
+        if uuid_items and len(uuid_items) == len(value):
+            first_key, first_item = uuid_items[0]
+            return {
+                "<UUID>": structural_shape(first_item, depth + 1, max_depth),
+                "_entry_count": len(value),
+            }
+        for index, (key, item) in enumerate(value.items()):
+            if index >= 16:
+                out["..."] = f"{len(value) - index} more keys"
+                break
+            out[sanitize_key(key)] = structural_shape(item, depth + 1, max_depth)
+        return out
+    if isinstance(value, list):
+        return {
+            "list_len": len(value),
+            "item_shape": structural_shape(value[0], depth + 1, max_depth) if value else None,
+        }
+    if isinstance(value, str):
+        return f"str_len={len(value)}"
+    if isinstance(value, bool):
+        return "bool"
+    if isinstance(value, int):
+        return "int"
+    if isinstance(value, float):
+        return "float"
+    if value is None:
+        return "null"
     return type(value).__name__
 
 
@@ -229,6 +266,34 @@ def collect_census(sample_chars=500):
     }, raw_records
 
 
+def collect_shapes(patterns=None, max_depth=4):
+    patterns = [item.lower() for item in (patterns or []) if item]
+    shapes = []
+    for db_path in state_db_candidates():
+        try:
+            conn = sqlite3.connect(db_path)
+            rows = conn.execute("SELECT key, value FROM ItemTable").fetchall()
+        except Exception:
+            continue
+
+        for key, value in rows:
+            key_text = str(key)
+            if patterns and not any(pattern in key_text.lower() for pattern in patterns):
+                continue
+            decoded = decode_value(value)
+            parsed = parse_jsonish(decoded)
+            flags = signal_flags(decoded)
+            shapes.append({
+                "key": sanitize_key(key_text),
+                "bytes": byte_len(value),
+                "decoded_shape": shape_of(parsed) if parsed is not None else shape_of(decoded),
+                "signals": flags,
+                "shape": structural_shape(parsed, max_depth=max_depth) if parsed is not None else shape_of(decoded),
+            })
+    shapes.sort(key=lambda item: (item["key"], -item["bytes"]))
+    return shapes
+
+
 def print_table(summary, limit):
     print(f"State DBs scanned: {summary['state_db_count']}")
     print(f"Rows scanned: {summary['row_count']}")
@@ -268,13 +333,26 @@ def main():
     parser.add_argument("--limit", type=int, default=40, help="max keys to print")
     parser.add_argument("--match", action="append", default=[], help="case-insensitive key substring filter; repeatable")
     parser.add_argument("--only-signal", action="store_true", help="only show keys with path/command/error/todo/timestamp signals")
+    parser.add_argument("--shape", action="store_true", help="print sanitized structural shapes for matched keys")
+    parser.add_argument("--max-depth", type=int, default=4, help="max structural shape depth")
     parser.add_argument("--json", action="store_true", dest="json_out", help="print sanitized JSON summary")
     parser.add_argument("--raw-out", default=str(default_raw_path()), help="raw ignored output path")
     parser.add_argument("--sample-chars", type=int, default=500, help="raw sample chars per row")
     args = parser.parse_args()
 
-    summary, raw_records = collect_census(sample_chars=args.sample_chars)
+    if args.shape:
+        shapes = collect_shapes(patterns=args.match, max_depth=args.max_depth)
+        if args.json_out:
+            print(json.dumps(shapes[:args.limit], ensure_ascii=False, indent=2))
+        else:
+            for item in shapes[:args.limit]:
+                print(f"KEY: {item['key']}")
+                print(f"  bytes={item['bytes']} decoded_shape={item['decoded_shape']} signals={item['signals']}")
+                print(json.dumps(item["shape"], ensure_ascii=False, indent=2))
+                print()
+        return
 
+    summary, raw_records = collect_census(sample_chars=args.sample_chars)
     raw_path = Path(args.raw_out)
     raw_path.parent.mkdir(parents=True, exist_ok=True)
     raw_path.write_text(json.dumps({
