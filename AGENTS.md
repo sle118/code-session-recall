@@ -24,6 +24,9 @@ entry point is `csr.py`.
   storage roots, workspace ids, and Copilot chat session ids without guessing.
 - `docs/HANDOFF_DESIGN.md` - roadmap for `csr handoff <query>` as a local
   extractor plus deterministic compressor for compact agent-ready context.
+- `docs/INSTALL.md` - how to install/update this repo as
+  `code-session-recall/`, ignore the local tool files, create optional wrapper
+  commands, and merge `AGENTS-TEMPLATE.md` into downstream workspaces.
 - `AGENTS-TEMPLATE.md` - the intended Copilot instruction template for using
   `csr` before broad repo searches.
 
@@ -49,6 +52,7 @@ python csr.py --help
 python csr.py scan
 python csr.py handoff "keyword"
 python csr.py handoff
+python csr.py ask "question" --json
 python csr.py list --json -n 5
 python csr.py search "keyword" --json
 python csr.py health

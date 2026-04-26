@@ -28,6 +28,7 @@ pasted into Copilot Chat or another coding agent.
 ```powershell
 python csr.py handoff "packet 007"
 python csr.py handoff
+python csr.py ask "packet 007"
 ```
 
 The command should:
@@ -38,10 +39,14 @@ The command should:
 4. Compress them with deterministic heuristics.
 5. Produce a compact handoff markdown packet.
 
-Current implementation status: `csr handoff` exists. It searches indexed
-sessions when given a query and falls back to recent/high-signal sessions when
-called without one. It emits capped markdown or JSON and avoids raw transcript
-dumps. Scoring is intentionally simple and deterministic.
+Current implementation status: `csr handoff` exists. `csr ask` is an alias for
+the same deterministic packet. The command searches indexed sessions when given
+a query and falls back to recent/high-signal sessions when called without one.
+If the index is empty, `handoff`, `ask`, and `list` perform one silent local scan
+and retry. Handoff emits capped markdown or JSON and avoids raw transcript
+dumps. If a query has no direct matches, handoff falls back to recent
+high-signal sessions so weak agent guesses still return orientation context.
+Scoring is intentionally simple and deterministic.
 
 Example shape:
 
@@ -171,6 +176,7 @@ Potential flags:
 ```powershell
 python csr.py handoff "packet 007" --limit 20
 python csr.py handoff "packet 007" --json
+python csr.py ask "packet 007" --json
 ```
 
 Current first-pass flags are `--limit/-n`, `--source/-s`, and `--json`.
@@ -220,6 +226,8 @@ python csr.py scan
 python csr.py handoff "packet 007"
 python csr.py handoff "memory"
 python csr.py handoff
+python csr.py ask "memory" --json
+python csr.py list --json --limit 5
 python csr.py handoff "unlikely-no-match-query"
 ```
 

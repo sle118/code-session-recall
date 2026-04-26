@@ -52,6 +52,7 @@ Usage (examples)
 python csr.py scan
 python csr.py handoff "keyword"
 python csr.py handoff
+python csr.py ask "question" --json
 python csr.py handoff "keyword" --json
 python csr.py search "keyword"
 python csr.py show <id> --json
@@ -74,6 +75,7 @@ session ids.
 	- `health` - basic DB/workspaceStorage/workspace check
 	- formatter fact extraction - Copilot chat formatting now extracts compact `files`, `commands`, `errors`, `nextSteps`, `editedFiles`, and `toolEvents` facts before recent-turn previews
 	- `handoff` - produce compact agent-ready markdown from matched or recent sessions
+	- `ask` - compatibility alias for `handoff` so natural agent recall commands work
 
 - Highest priority
 	- VS Code storage discovery - support Stable (`Code`), Insiders (`Code - Insiders`), and user-supplied roots; prefer environment-derived paths such as `APPDATA`, `TERM_PROGRAM_VERSION`, `VSCODE_*`, and terminal/tool metadata captured in Copilot sessions.
@@ -92,6 +94,7 @@ session ids.
 Notes and conventions
 - We intentionally keep sample data and temporary investigation outputs out of version control by default; see `.gitignore`.
 - Raw discovery outputs belong in ignored `unsanitized/`; only sanitized derivatives should be committed to `docs/` or code.
+- The intended downstream install pattern is a local `code-session-recall/` subdirectory inside each workspace; see `docs/INSTALL.md` for `.gitignore` entries, optional wrapper commands, and merging `AGENTS-TEMPLATE.md` into that workspace's top-level agent instructions.
 - Sessions are meant to be local by default; export if you need to share or archive them.
 
 Contributing and extensions

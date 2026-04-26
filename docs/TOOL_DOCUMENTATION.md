@@ -143,6 +143,7 @@ The CLI currently exposes:
 python csr.py scan
 python csr.py handoff "keyword"
 python csr.py handoff
+python csr.py ask "question" --json
 python csr.py search "keyword" --json
 python csr.py list --json --limit 5
 python csr.py show <session_id> --json
@@ -163,6 +164,11 @@ the extraction layer used by `handoff`.
 `handoff` emits a capped markdown packet for direct agent prompt injection. With
 a query it searches matching sessions; without a query it falls back to recent
 high-signal indexed sessions.
+
+If the index is empty, `handoff`, `ask`, and `list` perform one silent local
+scan and retry. This supports the intended "run recall first" workflow in fresh
+agent sessions. If a `handoff`/`ask` query has no direct matches, it falls back
+to recent high-signal sessions instead of returning an empty packet.
 
 For handoff ranking, chat/session sources are preferred over markdown docs when
 both match. Docs explain what exists; chat/session sources better capture what
@@ -187,6 +193,7 @@ Produce a compact markdown packet for a new agent from persisted local state.
 ```bash
 python csr.py handoff "packet 007"
 python csr.py handoff
+python csr.py ask "packet 007"
 python csr.py handoff "packet 007" --json
 python csr.py handoff "packet 007" --limit 20
 python csr.py handoff "packet 007" --source vscode-copilot
@@ -196,6 +203,10 @@ The handoff command scores and extracts high-signal rows: headings, file paths,
 commands, errors, decisions, TODO/next-step sentences, terminal tool records,
 edited files, and related context. If no query is provided, it uses recent
 high-signal indexed sessions.
+
+`ask` is a compatibility alias for `handoff`. It exists because agents often
+try natural command names during recall. It does not add LLM behavior or a new
+provider; it emits the same deterministic packet.
 
 ### files (Planned)
 List recently touched files with metadata.
@@ -355,7 +366,8 @@ code-session-recall/
 ├── docs/
 │   ├── TOOL_DOCUMENTATION.md # This file
 │   ├── ENVIRONMENT_DISCOVERY.md
-│   └── HANDOFF_DESIGN.md
+│   ├── HANDOFF_DESIGN.md
+│   └── INSTALL.md
 └── tools/
     └── exploratory/          # Historical local investigation probes
         ├── search_copilot_chats.py

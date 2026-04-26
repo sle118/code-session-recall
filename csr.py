@@ -1516,7 +1516,7 @@ def scan_md(root):
 # ----------------------------
 # COMMANDS
 # ----------------------------
-def cmd_scan():
+def cmd_scan(verbose=True):
     conn = db()
     c = conn.cursor()
 
@@ -1551,7 +1551,9 @@ def cmd_scan():
             pass
 
     conn.commit()
-    print(f"[scan] {inserted} sessions indexed ({len(sessions)} found)")
+    if verbose:
+        print(f"[scan] {inserted} sessions indexed ({len(sessions)} found)")
+    return inserted, len(sessions)
 
 
 def cmd_search(q, limit=10, sources=None, json_out=False, exact=False, since=None, until=None,
@@ -1736,7 +1738,7 @@ def sanitize_handoff_text(value):
             replacements.append((env_value.replace('\\', '/'), f'%{name}%'))
     username = os.getenv('USERNAME')
     if username:
-        replacements.append((f'\\Users\\{username}\\', r'\Users\<USER>\\'))
+        replacements.append((f'\\Users\\{username}\\', '\\Users\\<USER>\\'))
         replacements.append((f'/Users/{username}/', '/Users/<USER>/'))
     computer = os.getenv('COMPUTERNAME')
     if computer:
@@ -1893,6 +1895,15 @@ def select_scored_values(values, query=None, limit=8):
 
 def cmd_handoff(query=None, limit=5, sources=None, json_out=False):
     rows = get_handoff_candidate_rows(query=query, limit=limit, sources=sources)
+    if not rows:
+        # Handoff is intended as the first command an agent runs. Bootstrap an
+        # empty index once so a fresh clone still returns useful local context.
+        cmd_scan(verbose=False)
+        rows = get_handoff_candidate_rows(query=query, limit=limit, sources=sources)
+    fallback_used = False
+    if not rows and query:
+        rows = get_handoff_candidate_rows(query=None, limit=limit, sources=sources)
+        fallback_used = bool(rows)
     scored_rows = []
     for row in rows:
         score, facts = score_handoff_row(row, query=query)
@@ -1945,7 +1956,9 @@ def cmd_handoff(query=None, limit=5, sources=None, json_out=False):
     highlights = select_scored_values(aggregate.get('highlights'), query=query, limit=8)
 
     suggested = 'Inspect the likely files/session above, then continue from the decisions and errors listed here.'
-    if errors:
+    if fallback_used:
+        suggested = 'No exact indexed match was found. Use these recent/high-signal sessions as orientation, then run a narrower handoff query if needed.'
+    elif errors:
         suggested = 'Start by resolving or confirming the listed errors, then inspect the likely files/session above.'
     elif next_steps:
         suggested = 'Continue from the listed decisions / next steps and inspect the likely files/session above.'
@@ -1954,6 +1967,7 @@ def cmd_handoff(query=None, limit=5, sources=None, json_out=False):
 
     payload = {
         'query': query or '',
+        'fallback': 'recent-high-signal' if fallback_used else '',
         'sessions': sessions,
         'files': files,
         'commands': commands,
@@ -1979,6 +1993,9 @@ def cmd_handoff(query=None, limit=5, sources=None, json_out=False):
     print()
     print('## Query')
     print(query or '(recent/high-signal fallback)')
+    if fallback_used:
+        print()
+        print('No exact indexed match was found; showing recent/high-signal sessions instead.')
 
     print()
     print('## Likely sessions')
@@ -2001,37 +2018,57 @@ def cmd_handoff(query=None, limit=5, sources=None, json_out=False):
 
 
 def cmd_list(limit=20, sources=None, json_out=False, current_session_only=False,
-             exclude_current_session=False, include_excluded=False, exclude_sessions=None):
+             exclude_current_session=False, include_excluded=False, exclude_sessions=None,
+             bootstrap=True):
     """List sessions metadata."""
     conn = db()
     c = conn.cursor()
-    params = []
-    sql = "SELECT id, source, path, chat_session_id, title, created_at FROM sessions"
-    if sources:
-        placeholders = ','.join('?' for _ in sources)
-        sql += f" WHERE source IN ({placeholders})"
-        params.extend(sources)
-    sql += " ORDER BY created_at DESC LIMIT ?"
-    params.append(limit)
 
-    rows = c.execute(sql, tuple(params)).fetchall()
-    rows = [
-        r for r in rows
-        if should_include_chat_session(
-            r[3],
-            current_session_only=current_session_only,
-            exclude_current_session=exclude_current_session,
-            include_excluded=include_excluded,
-            extra_excluded_ids=exclude_sessions,
-        )
-    ]
+    def load_rows():
+        params = []
+        sql = "SELECT id, source, path, chat_session_id, title, created_at FROM sessions"
+        if sources:
+            placeholders = ','.join('?' for _ in sources)
+            sql += f" WHERE source IN ({placeholders})"
+            params.extend(sources)
+        sql += " ORDER BY created_at DESC LIMIT ?"
+        params.append(limit)
+
+        found = c.execute(sql, tuple(params)).fetchall()
+        return [
+            r for r in found
+            if should_include_chat_session(
+                r[3],
+                current_session_only=current_session_only,
+                exclude_current_session=exclude_current_session,
+                include_excluded=include_excluded,
+                extra_excluded_ids=exclude_sessions,
+            )
+        ]
+
+    rows = load_rows()
+    if not rows and bootstrap:
+        # Agents commonly run `list` before `handoff`. Make that first contact
+        # useful in a fresh workspace without requiring a separate scan step.
+        cmd_scan(verbose=False)
+        rows = load_rows()
     if json_out:
-        out = [{"id": r[0], "source": r[1], "path": r[2], "chat_session_id": r[3], "title": r[4], "created_at": r[5]} for r in rows]
+        out = [
+            {
+                "id": r[0],
+                "source": r[1],
+                "path": sanitize_handoff_text(r[2]),
+                "chat_session_id": r[3],
+                "title": sanitize_handoff_text(r[4]),
+                "created_at": r[5],
+            }
+            for r in rows
+        ]
         print(json.dumps(out, ensure_ascii=False, indent=2))
         return
 
     for r in rows:
-        print(r[0], r[1], r[2], r[3] or '-', r[4] or '-', r[5])
+        print(r[0], r[1], sanitize_handoff_text(r[2]), r[3] or '-', sanitize_handoff_text(r[4]) or '-', r[5])
 
 
 def cmd_show(sid, current_session_only=False, exclude_current_session=False,
@@ -2139,11 +2176,15 @@ def main():
     pl.add_argument('--include-excluded-sessions', action='store_true', help='include sessions from the workspace exclusion block')
     pl.add_argument('--exclude-session', action='append', help='exclude a specific chat session id (repeatable)')
 
-    phandoff = sub.add_parser('handoff', help='emit compact agent handoff context')
-    phandoff.add_argument('query', nargs='*', help='optional handoff query; defaults to recent/high-signal sessions')
-    phandoff.add_argument('-n', '--limit', type=int, default=5, help='max candidate sessions')
-    phandoff.add_argument('-s', '--source', type=str, help='comma-separated sources to filter')
-    phandoff.add_argument('--json', action='store_true', dest='json_out', help='output JSON')
+    for command_name, help_text in (
+        ('handoff', 'emit compact agent handoff context'),
+        ('ask', 'alias for handoff; answer with compact recalled context'),
+    ):
+        phandoff = sub.add_parser(command_name, help=help_text)
+        phandoff.add_argument('query', nargs='*', help='optional handoff query; defaults to recent/high-signal sessions')
+        phandoff.add_argument('-n', '--limit', type=int, default=5, help='max candidate sessions')
+        phandoff.add_argument('-s', '--source', type=str, help='comma-separated sources to filter')
+        phandoff.add_argument('--json', action='store_true', dest='json_out', help='output JSON')
 
     pshow = sub.add_parser('show', help='show session content')
     pshow.add_argument('id', help='session id')
@@ -2198,7 +2239,7 @@ def main():
             exclude_sessions=args.exclude_session,
         )
 
-    elif args.cmd == 'handoff':
+    elif args.cmd in ('handoff', 'ask'):
         q = ' '.join(args.query).strip() if args.query else None
         sources = args.source.split(',') if args.source else None
         cmd_handoff(
