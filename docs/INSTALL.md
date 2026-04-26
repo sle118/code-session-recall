@@ -15,12 +15,25 @@ The intended downstream layout is:
     csr.py
 ```
 
-When installing `code-session-recall` into a workspace, first make sure the
-installed tool folder and wrapper commands are excluded from the downstream
+Preferred install, once the package is published:
+
+```powershell
+python -m pip install code-session-recall
+csr --help
+```
+
+For local development or pre-release testing from a clone:
+
+```powershell
+python -m pip install -e .
+csr --help
+```
+
+When installing `code-session-recall` as a workspace-local tool, first make sure
+the installed tool folder and wrapper commands are excluded from the downstream
 project's Git history, then try to install a workspace-local `csr` command, then
-merge the contents of
-`code-session-recall/AGENTS-TEMPLATE.md` into the workspace's top-level
-`AGENTS.md` or equivalent agent instructions file.
+merge the contents of `code-session-recall/AGENTS-TEMPLATE.md` into the
+workspace's top-level `AGENTS.md` or equivalent agent instructions file.
 
 When updating `code-session-recall`, compare the current
 `AGENTS-TEMPLATE.md` with the downstream workspace instructions and refresh the
@@ -30,14 +43,16 @@ recall block if command behavior changed.
 
 From the downstream workspace root:
 
-1. Confirm `code-session-recall/csr.py` exists.
-2. Add ignore rules for the installed tool folder and local wrapper command.
-3. Try to create or update a workspace-local wrapper command.
-4. Verify the wrapper with `./csr --help` or `./csr.ps1 --help`.
-5. Merge `code-session-recall/AGENTS-TEMPLATE.md` into the top-level
+1. Prefer the packaged CLI: run `csr --help`.
+2. If `csr` is unavailable, install with `python -m pip install code-session-recall` or `python -m pip install -e <path-to-code-session-recall>`.
+3. If package install is unavailable, confirm `code-session-recall/csr.py` exists.
+4. Add ignore rules for the installed tool folder and local wrapper command.
+5. Try to create or update a workspace-local wrapper command.
+6. Verify the wrapper with `./csr --help` or `./csr.ps1 --help`.
+7. Merge `code-session-recall/AGENTS-TEMPLATE.md` into the top-level
    instructions.
-6. If the wrapper works, write the merged instructions with short `csr`
-   commands. If wrapper installation fails, keep the explicit
+8. If the packaged CLI or wrapper works, write the merged instructions with
+   short `csr` commands. If both fail, keep the explicit
    `python code-session-recall/csr.py` commands.
 
 Do not overwrite an unrelated existing `csr`, `csr.ps1`, or project command.
@@ -101,8 +116,42 @@ use the explicit Python command form in agent instructions.
 
 ## Instruction Merge
 
-If wrapper installation succeeded, downstream instructions should tell agents to
-run:
+Place a short pointer near the top of the downstream `AGENTS.md` or equivalent
+instructions file, before long tool lists or project notes. This keeps CSR from
+being buried during arbitrary merges:
+
+```markdown
+## Session Recall - Run First
+
+Before broad searches or fresh reasoning, run `csr handoff "<prompt summary>"`.
+If unsure what to search for, run `csr handoff`. Use the result as orientation
+context, then continue with targeted inspection.
+```
+
+Then merge the fuller recall block from `AGENTS-TEMPLATE.md`.
+
+If packaged CLI installation succeeded, downstream instructions should tell
+agents to run:
+
+```powershell
+csr handoff "<term or prompt summary>"
+```
+
+Agents may also use:
+
+```powershell
+csr ask "<question>"
+```
+
+as a natural-language alias for the same deterministic handoff behavior. If the
+query is unclear, agents should run:
+
+```powershell
+csr handoff
+```
+
+If wrapper installation succeeded but the packaged CLI is unavailable,
+downstream instructions should tell agents to run:
 
 ```powershell
 ./csr handoff "<term or prompt summary>"

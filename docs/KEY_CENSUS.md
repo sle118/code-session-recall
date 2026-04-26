@@ -49,7 +49,10 @@ Prioritize keys that are frequent or high-signal:
 
 - `chat.ChatSessionStore.index` - session ids, titles, and timing metadata.
 - `memento/interactive-session` - prompt history and resumable chat context.
-- `memento/chat-todo-list` - likely next-step signal when present.
+- `memento/chat-todo-list` - likely next-step signal when present; now has a
+  compact formatter and is indexed as `vscode-live`.
+- `agentSessions.model.cache` - agent/subagent labels, status, timing, and
+  change counts; now has a compact formatter and is indexed as `vscode-live`.
 - `terminal.integrated.bufferState` - possible terminal output and command
   recovery signal.
 - `chat.terminalSessions` and `terminalChat.toolSessionMappings` - possible

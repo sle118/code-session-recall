@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "code-session-recall"
+version = "0.1.0"
+description = "Local VS Code/Copilot session recall CLI for low-token agent handoffs"
+readme = "README.md"
+requires-python = ">=3.9"
+authors = [
+  { name = "code-session-recall contributors" }
+]
+keywords = ["copilot", "vscode", "agent", "session", "recall", "cli"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Topic :: Software Development",
+  "Topic :: Utilities"
+]
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/sle118/code-session-recall"
+Repository = "https://github.com/sle118/code-session-recall"
+Issues = "https://github.com/sle118/code-session-recall/issues"
+
+[project.scripts]
+csr = "csr:main"
+
+[tool.setuptools]
+py-modules = ["csr"]

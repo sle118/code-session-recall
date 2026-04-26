@@ -22,6 +22,11 @@ venv/
 *.tmp
 unsanitized/
 
+# Python packaging outputs
+build/
+dist/
+*.egg-info/
+
 # Editor / OS / workspace
 .vscode/
 .idea/

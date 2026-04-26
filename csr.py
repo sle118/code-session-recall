@@ -144,6 +144,31 @@ def should_include_chat_session(chat_session_id, current_session_only=False, exc
     return True
 
 
+def workspace_storage_candidates():
+    roots = []
+    explicit = os.getenv("CSR_VSCODE_WORKSPACE_STORAGE")
+    if explicit:
+        roots.append(Path(explicit))
+
+    appdata = os.getenv("APPDATA")
+    if appdata:
+        appdata_path = Path(appdata)
+        roots.extend([
+            appdata_path / "Code" / "User" / "workspaceStorage",
+            appdata_path / "Code - Insiders" / "User" / "workspaceStorage",
+            appdata_path / "VSCodium" / "User" / "workspaceStorage",
+        ])
+
+    seen = set()
+    out = []
+    for path in roots:
+        key = str(path).lower()
+        if key not in seen:
+            seen.add(key)
+            out.append(path)
+    return out
+
+
 # ----------------------------
 # VS CODE / COPILOT EXTRACTION
 # ----------------------------
@@ -1230,8 +1255,133 @@ def format_chat_chatsessionstore_index(decoded):
     return format_raw_payload(decoded)
 
 
+def status_counts(values):
+    counts = {}
+    for value in values:
+        key = stringify_text(value or 'unknown').strip() or 'unknown'
+        counts[key] = counts.get(key, 0) + 1
+    return counts
+
+
+def format_counts(counts):
+    if not counts:
+        return 'none'
+    return ', '.join(f'{key}={value}' for key, value in sorted(counts.items()))
+
+
+def format_epoch_ms(value):
+    parsed = parse_timestamp(value)
+    if not parsed:
+        return None
+    return parsed.isoformat().replace('+00:00', 'Z')
+
+
 def format_memento_chat_todo_list(decoded):
-    return format_raw_payload(decoded)
+    try:
+        if not isinstance(decoded, dict):
+            return '# CHAT TODO LIST\nSessions: 0 | todos: 0 | status: none'
+
+        session_count = 0
+        todo_count = 0
+        statuses = []
+        session_lines = []
+
+        for session_id, todos in decoded.items():
+            if not isinstance(todos, list):
+                continue
+            session_count += 1
+            session_label = clip_text(session_id, 16)
+            session_lines.append(f'Session {session_label}:')
+            before_count = todo_count
+            for todo in todos:
+                if not isinstance(todo, dict):
+                    continue
+                title = sanitize_handoff_text(clip_text(todo.get('title') or '(untitled todo)', 180))
+                status = clip_text(todo.get('status') or 'unknown', 40)
+                todo_id = todo.get('id')
+                todo_count += 1
+                statuses.append(status)
+                id_part = f' id={todo_id}' if todo_id is not None else ''
+                session_lines.append(f'- todo{id_part} status={status} title={title}')
+            if todo_count == before_count:
+                session_lines.append('- todo status=empty title=(none)')
+
+        lines = [
+            '# CHAT TODO LIST',
+            f'Sessions: {session_count} | todos: {todo_count} | status: {format_counts(status_counts(statuses))}',
+            'Next-step signal: Copilot chat todo list state',
+            '',
+        ]
+        lines.extend(session_lines or ['No todo items found.'])
+        return '\n'.join(lines)
+    except Exception:
+        return '# CHAT TODO LIST\nSessions: 0 | todos: 0 | status: error\nNo todo items could be formatted.'
+
+
+def format_agent_sessions_model_cache(decoded):
+    try:
+        if not isinstance(decoded, list):
+            return '# AGENT SESSIONS\nEntries: 0 | providers: none | status: none'
+
+        providers = []
+        statuses = []
+        entries = []
+        for item in decoded:
+            if not isinstance(item, dict):
+                continue
+            provider_type = clip_text(item.get('providerType') or 'unknown', 40)
+            provider_label = clip_text(item.get('providerLabel') or provider_type, 60)
+            label = sanitize_handoff_text(clip_text(item.get('label') or '(untitled agent session)', 180))
+            status = stringify_text(item.get('status') if item.get('status') is not None else 'unknown')
+            timing = item.get('timing') if isinstance(item.get('timing'), dict) else {}
+            changes = item.get('changes') if isinstance(item.get('changes'), dict) else {}
+            providers.append(provider_label)
+            statuses.append(status)
+            entries.append({
+                'provider_type': provider_type,
+                'provider_label': provider_label,
+                'label': label,
+                'status': status,
+                'created': format_epoch_ms(timing.get('created')),
+                'started': format_epoch_ms(timing.get('lastRequestStarted')),
+                'ended': format_epoch_ms(timing.get('lastRequestEnded')),
+                'changes': changes,
+            })
+
+        lines = [
+            '# AGENT SESSIONS',
+            f'Entries: {len(entries)} | providers: {format_counts(status_counts(providers))} | status: {format_counts(status_counts(statuses))}',
+            'Subagent activity signal: agent session model cache',
+            '',
+            'Recent agent sessions:',
+        ]
+        if not entries:
+            lines.append('- agent status=empty label=(none)')
+            return '\n'.join(lines)
+
+        for entry in entries[-12:]:
+            bits = [
+                f"agent provider={entry['provider_label']}",
+                f"type={entry['provider_type']}",
+                f"status={entry['status']}",
+            ]
+            if entry.get('created'):
+                bits.append(f"created={entry['created']}")
+            if entry.get('started'):
+                bits.append(f"started={entry['started']}")
+            if entry.get('ended'):
+                bits.append(f"ended={entry['ended']}")
+            changes = entry.get('changes') or {}
+            change_bits = []
+            for key in ('files', 'insertions', 'deletions'):
+                if key in changes:
+                    change_bits.append(f'{key}={changes.get(key)}')
+            if change_bits:
+                bits.append('changes=' + ','.join(change_bits))
+            lines.append(f"- {' | '.join(bits)} | label={entry['label']}")
+        return '\n'.join(lines)
+    except Exception:
+        return '# AGENT SESSIONS\nEntries: 0 | providers: none | status: error\nNo agent sessions could be formatted.'
 
 
 def format_chat_customModes(decoded):
@@ -1283,6 +1433,10 @@ def format_payload_for_key(key, decoded, raw=None):
     if 'memento/chat-todo-list' in lk or 'chat-todo-list' in lk:
         return format_memento_chat_todo_list(decoded)
 
+    # agent/subagent session summaries
+    if 'agentsessions.model.cache' in lk:
+        return format_agent_sessions_model_cache(decoded)
+
     # custom modes definitions
     if 'chat.custommodes' in lk or 'custommodes' in lk:
         return format_chat_customModes(decoded)
@@ -1298,68 +1452,91 @@ def format_payload_for_key(key, decoded, raw=None):
     return None
 
 
-def scan_vscode():
-    base = Path(os.getenv("APPDATA", "")) / "Code" / "User" / "workspaceStorage"
-    if not base.exists():
-        return []
+def should_index_vscode_state_key(key):
+    lk = (key or '').lower()
+    return (
+        lk == 'memento/interactive-session'
+        or 'memento/chat-todo-list' in lk
+        or 'agentsessions.model.cache' in lk
+    )
 
+
+def friendly_vscode_state_title(key, fallback_title=None):
+    lk = (key or '').lower()
+    if 'memento/chat-todo-list' in lk:
+        label = 'Copilot chat todo list'
+    elif 'agentsessions.model.cache' in lk:
+        label = 'Agent session model cache'
+    elif 'memento/interactive-session' in lk:
+        label = 'Copilot interactive session'
+    else:
+        label = key or 'VS Code state'
+    if fallback_title:
+        return f'{label} - {fallback_title}'
+    return label
+
+
+def scan_vscode():
     sessions = []
 
-    for dbfile in base.rglob("state.vscdb"):
-        try:
-            conn = sqlite3.connect(dbfile)
-            c = conn.cursor()
+    for base in workspace_storage_candidates():
+        if not base.exists():
+            continue
 
-            rows = c.execute("SELECT key, value FROM ItemTable").fetchall()
+        for dbfile in base.rglob("state.vscdb"):
+            try:
+                conn = sqlite3.connect(dbfile)
+                c = conn.cursor()
 
-            # Current closure target: focus on the interactive-session key path only.
-            for key, value in rows:
-                if not key:
-                    continue
+                rows = c.execute("SELECT key, value FROM ItemTable").fetchall()
 
-                lk = key.lower()
-                if 'memento/interactive-session' not in lk:
-                    continue
-                raw_value = value
-                decoded = try_decode(value)
-                if decoded is None:
-                    continue
-
-                # Try key-specific formatter first; formatter returns full string or None to fallback
-                formatted = format_payload_for_key(key, decoded, raw_value)
-                if formatted is not None:
-                    content = formatted
-                else:
-                    msgs = []
-                    if isinstance(decoded, (dict, list)):
-                        msgs = extract_messages(decoded)
-                    elif isinstance(decoded, str):
-                        try:
-                            parsed = json.loads(decoded)
-                            msgs = extract_messages(parsed)
-                        except Exception:
-                            msgs = [decoded]
-
-                    if not msgs:
+                for key, value in rows:
+                    if not key:
                         continue
 
-                    content = "\n".join(msgs)
+                    if not should_index_vscode_state_key(key):
+                        continue
+                    raw_value = value
+                    decoded = try_decode(value)
+                    if decoded is None:
+                        continue
 
-                sid = hid(str(dbfile) + key)
+                    # Try key-specific formatter first; formatter returns full string or None to fallback
+                    formatted = format_payload_for_key(key, decoded, raw_value)
+                    if formatted is not None:
+                        content = formatted
+                    else:
+                        msgs = []
+                        if isinstance(decoded, (dict, list)):
+                            msgs = extract_messages(decoded)
+                        elif isinstance(decoded, str):
+                            try:
+                                parsed = json.loads(decoded)
+                                msgs = extract_messages(parsed)
+                            except Exception:
+                                msgs = [decoded]
 
-                sessions.append({
-                    "id": sid,
-                    "source": "vscode-live",
-                    "path": f"{dbfile}::{key}",
-                    "chat_session_id": infer_current_chat_session_id_from_state_db(dbfile),
-                    "title": infer_title_from_state_db(dbfile),
-                    "created_at": envelope_last_timestamp_iso(decoded) or path_mtime_iso(dbfile),
-                    "content": content,
-                    "display_content": content,
-                })
+                        if not msgs:
+                            continue
 
-        except:
-            continue
+                        content = "\n".join(msgs)
+
+                    sid = hid(str(dbfile) + key)
+                    inferred_title = infer_title_from_state_db(dbfile)
+
+                    sessions.append({
+                        "id": sid,
+                        "source": "vscode-live",
+                        "path": f"{dbfile}::{key}",
+                        "chat_session_id": infer_current_chat_session_id_from_state_db(dbfile),
+                        "title": friendly_vscode_state_title(key, fallback_title=inferred_title),
+                        "created_at": envelope_last_timestamp_iso(decoded) or path_mtime_iso(dbfile),
+                        "content": content,
+                        "display_content": content,
+                    })
+
+            except:
+                continue
 
     return sessions
 
@@ -1710,11 +1887,11 @@ def cmd_search(q, limit=10, sources=None, json_out=False, exact=False, since=Non
             out.append({
                 "id": r[0],
                 "source": r[1],
-                "path": r[2],
+                "path": sanitize_handoff_text(r[2]),
                 "chat_session_id": r[3],
-                "title": r[4],
+                "title": sanitize_handoff_text(r[4]),
                 "created_at": r[5],
-                "content": r[6] or ""
+                "content": sanitize_handoff_text(r[6] or "")
             })
         print(json.dumps(out, ensure_ascii=False, indent=2))
         return
@@ -1722,9 +1899,9 @@ def cmd_search(q, limit=10, sources=None, json_out=False, exact=False, since=Non
     for r in rows:
         sid, src, path, chat_session_id, title, created_at, content = r[0], r[1], r[2], r[3], r[4], r[5], r[6] or ""
         print("# SESSION")
-        print(f"id: {sid} | source: {src} | chat_session_id: {chat_session_id or '-'} | title: {title or '-'} | path: {path} | created_at: {created_at}")
+        print(f"id: {sid} | source: {src} | chat_session_id: {chat_session_id or '-'} | title: {sanitize_handoff_text(title) or '-'} | path: {sanitize_handoff_text(path)} | created_at: {created_at}")
         print("-" * 60)
-        print(content)
+        print(sanitize_handoff_text(content))
         print("")
 
 

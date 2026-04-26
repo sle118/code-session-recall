@@ -4,6 +4,15 @@
 
 **Code Session Recall** (csr) is a lightweight, privacy-first CLI tool for recovering and searching past coding sessions and AI-assisted work. It scans your VS Code workspace and session stores, indexes session metadata and file activity, and provides fast, targeted lookups to help you rediscover prior work without expensive workspace-wide searches.
 
+CSR is inspired by Desi Villanueva's
+["I Wasted 68 Minutes a Day Re-Explaining My Code. Then I Built auto-memory."](https://devblogs.microsoft.com/all-things-azure/i-wasted-68-minutes-a-day-re-explaining-my-code-then-i-built-auto-memory/)
+and the related [`auto-memory`](https://github.com/dezgit2025/auto-memory)
+repository. The shared idea is progressive local recall before expensive
+rediscovery. CSR is heavier because VS Code/GitHub Copilot does not expose a
+single convenient session-store database like Copilot CLI; it has to recover and
+compress context from workspace storage, `state.vscdb`, chat JSONL files, and
+extension artifacts.
+
 ## Purpose & Use Cases
 
 ### Primary Goal
@@ -51,9 +60,22 @@ Database health and schema information:
 ## Installation & Setup
 
 ### Basic Setup
-1. Clone or download the repository
-2. Ensure Python 3.7+ is installed
-3. Run commands via `python csr.py`
+1. Ensure Python 3.9+ is installed
+2. Install the package once published: `python -m pip install code-session-recall`
+3. Run commands via `csr`
+
+For local development or pre-release testing from a clone:
+
+```bash
+python -m pip install -e .
+csr --help
+```
+
+The repository-local compatibility form remains available:
+
+```bash
+python csr.py --help
+```
 
 ### VS Code Integration (Optional)
 For seamless integration with GitHub Copilot:
@@ -160,6 +182,11 @@ extraction. For parsed `chatSessions/*.jsonl` sessions it surfaces compact
 sections for files, edited files, commands, errors, decisions/next steps,
 high-signal lines, and terminal/tool events before recent-turn previews. This is
 the extraction layer used by `handoff`.
+
+VS Code state scanning also indexes compact `vscode-live` records for
+`memento/interactive-session`, `memento/chat-todo-list`, and
+`agentSessions.model.cache`. These records expose prompt trails, Copilot todo
+state, and agent/subagent session summaries without dumping raw persisted JSON.
 
 `handoff` emits a capped markdown packet for direct agent prompt injection. With
 a query it searches matching sessions; without a query it falls back to recent

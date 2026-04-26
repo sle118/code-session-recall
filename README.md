@@ -7,6 +7,14 @@ State of the union
 
 `code-session-recall` (csr) is a small, local CLI that helps you rediscover past coding work and AI-assisted sessions. It scans your workspace and local session stores, indexes recent activity, and provides quick lookups so you can run `csr` before asking large-context tools to search your repo. The goal is to make context retrieval cheap, targeted, and privacy-friendly.
 
+Inspiration: CSR is inspired by Desi Villanueva's article
+["I Wasted 68 Minutes a Day Re-Explaining My Code. Then I Built auto-memory."](https://devblogs.microsoft.com/all-things-azure/i-wasted-68-minutes-a-day-re-explaining-my-code-then-i-built-auto-memory/)
+and the related [`auto-memory`](https://github.com/dezgit2025/auto-memory)
+project. `auto-memory` targets Copilot CLI's local session database. CSR applies
+the same recall-first idea to VS Code/GitHub Copilot, where useful state is
+spread across VS Code workspace storage, chat session JSONL files, extension
+artifacts, and state databases rather than one easy-to-query CLI database.
+
 Core capabilities
 - Scan and index: crawl specified folders and extract session metadata and touched files.
 - Search: full-text search across indexed sessions and extracted text artifacts.
@@ -17,6 +25,29 @@ Intended usage
 - Run `csr scan` after a focused work session (or let it be scheduled) to capture a session snapshot.
 - Run `csr` commands before using an expensive workspace-wide search or an LLM prompt to surface recent, relevant context.
 - Use `csr show <id>` to rehydrate a prior session when you need the exact commands, files, or checkpoints.
+
+Installation
+------------
+
+Once published to PyPI:
+
+```bash
+python -m pip install code-session-recall
+csr handoff
+```
+
+For local development or pre-release testing from a clone:
+
+```bash
+python -m pip install -e .
+csr --help
+```
+
+The repository-local entry point remains available:
+
+```bash
+python csr.py handoff
+```
 
 VS Code + GitHub Copilot integration
 - This tool is designed to complement the GitHub Copilot extension in Visual Studio Code. Use `csr` to surface local session context before invoking Copilot so prompts sent to Copilot are focused and cheaper.
@@ -101,5 +132,9 @@ Contributing and extensions
 - The `csr` architecture is intentionally small — new extractors and exporters can be added as modules. If you want a tighter IDE integration or a remote sync feature, add it as an optional plugin.
 
 License / attribution
+- Inspired by Desi Villanueva's Auto Memory article and the
+  `dezgit2025/auto-memory` repository:
+  https://devblogs.microsoft.com/all-things-azure/i-wasted-68-minutes-a-day-re-explaining-my-code-then-i-built-auto-memory/
+  and https://github.com/dezgit2025/auto-memory.
 - (add license and contributor notes here)
 

@@ -19,6 +19,18 @@ Assumed layout:
 Run `code-session-recall` before broad filesystem searches or fresh reasoning.
 It costs little and reduces blind rediscovery.
 
+Prefer the installed CLI when available:
+
+```bash
+csr handoff '<term or prompt summary>'  # compact context packet; run this first
+csr handoff                             # fallback to recent/high-signal sessions
+csr ask '<question>' --json             # compatibility alias for handoff
+csr list --json --limit 5               # recent sessions
+csr search '<term>' --json              # full-text search
+csr show <id> --json                    # drill into one session
+csr health                              # local health check
+```
+
 If the downstream workspace has a verified wrapper, prefer the short command:
 
 ```bash

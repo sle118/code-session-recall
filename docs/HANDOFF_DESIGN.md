@@ -125,7 +125,9 @@ JSONL structures.
 Current implementation status: `parse_chat_session_state()` derives several of
 these rows in memory, `format_chat_session_transcript()` displays compact
 sections before recent-turn previews, and `csr handoff` reuses those indexed
-facts/text to emit a prompt-sized handoff. The rows are not yet stored in
+facts/text to emit a prompt-sized handoff. VS Code state scanning also derives
+compact records from `memento/chat-todo-list` and `agentSessions.model.cache`
+for todo and agent/subagent activity recall. The rows are not yet stored in
 dedicated SQLite tables.
 
 ## Compression Heuristics
@@ -194,6 +196,8 @@ Near-term formatter targets:
 - Terminal command metadata and output. First pass exists.
 - `editedFileEvents`. First pass exists.
 - Inline file references in VS Code URI objects. First pass exists.
+- `memento/chat-todo-list` Copilot todo state. First pass exists.
+- `agentSessions.model.cache` agent/subagent summaries. First pass exists.
 - `chat.ChatSessionStore.index` timing/title/session metadata.
 - Environment dump command outputs, especially `Name`/`Value` or `Key`/`Value`
   pairs.
