@@ -355,6 +355,16 @@ The csr codebase is intentionally minimal to encourage extensions:
 - Build plugins for tighter IDE integration
 - Contribute improvements via pull requests
 
+For formatter discovery, use the privacy-safe key census before adding support
+for new VS Code/Copilot persisted-state keys:
+
+```bash
+python tools/exploratory/key_census.py --limit 40
+```
+
+The command prints sanitized aggregate counts and writes raw samples only under
+ignored `unsanitized/`. See `docs/KEY_CENSUS.md`.
+
 ## File Structure
 
 ```

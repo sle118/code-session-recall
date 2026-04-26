@@ -24,6 +24,8 @@ entry point is `csr.py`.
   storage roots, workspace ids, and Copilot chat session ids without guessing.
 - `docs/HANDOFF_DESIGN.md` - roadmap for `csr handoff <query>` as a local
   extractor plus deterministic compressor for compact agent-ready context.
+- `docs/KEY_CENSUS.md` - privacy-safe workflow for measuring VS Code/Copilot
+  state keys before adding new formatters.
 - `docs/INSTALL.md` - how to install/update this repo as
   `code-session-recall/`, ignore the local tool files, create optional wrapper
   commands, and merge `AGENTS-TEMPLATE.md` into downstream workspaces.

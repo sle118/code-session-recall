@@ -1,0 +1,56 @@
+# Privacy-Safe State Key Census
+
+Use the key census before implementing new state formatters. The goal is to
+measure which VS Code/Copilot persisted keys actually exist and which ones carry
+useful recall signals, without committing raw local state.
+
+Run from the repo root:
+
+```powershell
+python tools/exploratory/key_census.py --limit 40
+```
+
+The command prints only aggregate counts and signal flags. Raw row samples are
+written to an ignored `unsanitized/key-census-*.json` file for local inspection.
+Do not commit files from `unsanitized/`.
+
+Useful follow-up command:
+
+```powershell
+python tools/exploratory/key_census.py --json > unsanitized/key-census-summary.json
+```
+
+The JSON summary is still intended as local discovery output unless it has been
+reviewed and sanitized.
+
+## What To Look For
+
+Prioritize keys that are frequent or high-signal:
+
+- `chat.ChatSessionStore.index` - session ids, titles, and timing metadata.
+- `memento/interactive-session` - prompt history and resumable chat context.
+- `memento/chat-todo-list` - likely next-step signal when present.
+- `terminal.integrated.bufferState` - possible terminal output and command
+  recovery signal.
+- `chat.terminalSessions` and `terminalChat.toolSessionMappings` - possible
+  links between chat turns and terminals.
+- `GitHub.copilot-chat` and related Copilot keys - extension-specific state.
+
+Ignore or deprioritize keys that are mostly UI layout, view visibility,
+booleans, or large editor MRU blobs with no command/error/todo/path signal.
+
+## Creating Missing Keys
+
+If an expected key is missing, create the relevant behavior in Copilot or VS
+Code, then rerun the census. Examples:
+
+- Open Copilot Chat and send a short prompt to refresh interactive-session
+  state.
+- Ask Copilot to run or explain a terminal command to refresh terminal/chat
+  mappings.
+- Create or complete Copilot TODO/plan items if testing todo-list storage.
+- Open files, run searches, or trigger tasks only when testing those specific
+  key families.
+
+After the key appears, inspect the raw sample in `unsanitized/`, then implement
+only the formatter fields that produce compact, sanitized recall value.
