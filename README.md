@@ -1,0 +1,97 @@
+# code-session-recall
+
+Minimal tool to recover past coding/AI sessions.
+
+State of the union
+-------------------
+
+`code-session-recall` (csr) is a small, local CLI that helps you rediscover past coding work and AI-assisted sessions. It scans your workspace and local session stores, indexes recent activity, and provides quick lookups so you can run `csr` before asking large-context tools to search your repo. The goal is to make context retrieval cheap, targeted, and privacy-friendly.
+
+Core capabilities
+- Scan and index: crawl specified folders and extract session metadata and touched files.
+- Search: full-text search across indexed sessions and extracted text artifacts.
+- Show: present a single session's details (checkpoints, files, commands, snippets).
+- Export: dump sessions or indexes for backup or sharing.
+
+Intended usage
+- Run `csr scan` after a focused work session (or let it be scheduled) to capture a session snapshot.
+- Run `csr` commands before using an expensive workspace-wide search or an LLM prompt to surface recent, relevant context.
+- Use `csr show <id>` to rehydrate a prior session when you need the exact commands, files, or checkpoints.
+
+VS Code + GitHub Copilot integration
+- This tool is designed to complement the GitHub Copilot extension in Visual Studio Code. Use `csr` to surface local session context before invoking Copilot so prompts sent to Copilot are focused and cheaper.
+- Installation pattern: place the `AGENTS-TEMPLATE.md` content into `~/.copilot/copilot-instructions.md` (or append it) to teach Copilot to run `csr` first on each prompt. Alternately, copy the template into your workspace notes and reference it from your Copilot config.
+- Recommended flow: run `csr files`/`csr list` (or `csr search`) to collect context, then paste or include the relevant snippets in the Copilot prompt.
+
+Key record types and what they provide
+- Session (primary unit)
+	- id: stable session identifier
+	- times: start / end / last-modified timestamps
+	- summary: short natural-language summary (if available)
+	- files: list of file paths touched and small excerpts
+	- commands: captured commands and terminal history snippets
+	- checkpoints: named snapshots within the session
+	- tags/labels: user or auto-generated tags
+
+- File record
+	- path: workspace-relative path
+	- last_touched: timestamp
+	- diffs/snippets: small context snippets or a short diff for quick review
+
+- Checkpoint
+	- checkpoint id/name
+	- description: short note captured at checkpoint time
+	- snapshot: list of important files and their short hashes
+
+- Health / Index metadata
+	- schema version: DB layout version
+	- index stats: counts, last-scan, errors
+
+Usage (examples)
+
+python csr.py scan
+python csr.py search "keyword"
+python csr.py show <id> --json
+python csr.py export --out sessions.ndjson
+
+Roadmap
+-------
+
+The code and docs are mid-migration from an earlier machine/user profile. The
+near-term goal is to make `csr` discover the active VS Code/Copilot environment
+from local state instead of relying on hard-coded usernames, storage folders, or
+session ids.
+
+- Implemented / present in this repo
+	- `scan` - crawl and index workspace and session stores
+	- `search` - full-text search across indexed records
+	- `list` - list recent indexed sessions
+	- `show` - display a single session
+	- `export` - export sessions or slices
+	- `health` - basic DB/workspaceStorage/workspace check
+
+- Highest priority
+	- VS Code storage discovery - support Stable (`Code`), Insiders (`Code - Insiders`), and user-supplied roots; prefer environment-derived paths such as `APPDATA`, `TERM_PROGRAM_VERSION`, `VSCODE_*`, and terminal/tool metadata captured in Copilot sessions.
+	- Session discovery - infer the active workspace/session from `chat.ChatSessionStore.index`, `chatSessions/*.jsonl`, terminal command metadata, and conversation titles instead of hard-coded `WORKSPACE_CURRENT_CHAT_SESSION_ID`.
+	- Environment-aware recall - index Copilot terminal/tool records, including command, cwd, language, exit code, command URI, and useful environment variables, so future scans can locate the right database/session without guessing.
+	- Deterministic handoff compression - add `csr handoff <query>` as an extractor plus local heuristic compressor that emits compact agent-ready markdown from persisted Copilot/VS Code state; see `docs/HANDOFF_DESIGN.md`.
+	- Docs parity - keep README, `docs/TOOL_DOCUMENTATION.md`, `AGENTS-TEMPLATE.md`, and `csr --help` aligned with actual CLI behavior.
+
+- Roadmap / desirable commands and flags
+	- `handoff` - produce a low-token agent handoff from matched sessions, files, commands, errors, decisions, and next steps: `csr handoff "packet 007"`
+	- `files` - list recently touched files with metadata (useful for quick context): `csr files --json --limit 10`
+	- `checkpoints` - list or search named checkpoints across sessions
+	- enhanced `health` - 8-dimension health check report for the local datastore, VS Code storage discovery, current workspace/session, parser coverage, and index freshness
+	- `schema-check` - validate DB schema and guide migrations after upgrades
+	- finer `--days N` filtering for `list`, `files`, `search`, `checkpoints` (convenience flag)
+
+Notes and conventions
+- We intentionally keep sample data and temporary investigation outputs out of version control by default; see `.gitignore`.
+- Sessions are meant to be local by default; export if you need to share or archive them.
+
+Contributing and extensions
+- The `csr` architecture is intentionally small — new extractors and exporters can be added as modules. If you want a tighter IDE integration or a remote sync feature, add it as an optional plugin.
+
+License / attribution
+- (add license and contributor notes here)
+

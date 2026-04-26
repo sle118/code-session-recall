@@ -1,0 +1,394 @@
+# Code Session Recall (CSR) — Complete Documentation
+
+## Overview
+
+**Code Session Recall** (csr) is a lightweight, privacy-first CLI tool for recovering and searching past coding sessions and AI-assisted work. It scans your VS Code workspace and session stores, indexes session metadata and file activity, and provides fast, targeted lookups to help you rediscover prior work without expensive workspace-wide searches.
+
+## Purpose & Use Cases
+
+### Primary Goal
+Make session context retrieval **cheap, fast, and local** so you can:
+- Surface relevant code context before invoking large language models
+- Keep AI prompts focused and reduce token usage
+- Recover past commands, checkpoints, and file states
+- Maintain full privacy with local-only data storage
+
+### Typical Workflows
+1. **Pre-LLM Context Gathering**: Run `csr search <keyword>` or `csr files` to extract targeted context before prompting Copilot
+2. **Session Recovery**: Use `csr show <id>` to rehydrate a past session with exact commands, snippets, and state
+3. **Periodic Snapshots**: Scheduled `csr scan` runs capture ongoing work for later retrieval
+4. **Export & Sharing**: Export indexed sessions for collaboration or archival
+
+## Core Concepts
+
+### Sessions
+The primary unit of organization. Each session represents a coding work period and contains:
+- **id**: Stable session identifier
+- **timestamps**: Start, end, and last-modified times
+- **summary**: Natural-language description (if captured)
+- **files**: Workspace-relative paths of touched files with small excerpts
+- **commands**: Captured terminal commands and shell history
+- **checkpoints**: Named snapshots within the session
+- **tags/labels**: User or auto-generated categorization
+
+### Files
+File records track touched files with metadata:
+- **path**: Workspace-relative path
+- **last_touched**: Timestamp of last modification
+- **diffs/snippets**: Small context excerpts or short diffs for quick review
+
+### Checkpoints
+Named snapshots created during a session:
+- **checkpoint id/name**: Unique identifier
+- **description**: Short note from checkpoint time
+- **snapshot**: List of important files and their content hashes
+
+### Index & Metadata
+Database health and schema information:
+- **schema version**: DB layout version for tracking migrations
+- **index stats**: Record counts, last-scan timestamp, error logs
+
+## Installation & Setup
+
+### Basic Setup
+1. Clone or download the repository
+2. Ensure Python 3.7+ is installed
+3. Run commands via `python csr.py`
+
+### VS Code Integration (Optional)
+For seamless integration with GitHub Copilot:
+1. Copy the content of `AGENTS-TEMPLATE.md` from this repo
+2. Add it to your VS Code settings:
+   - Open `~/.copilot/copilot-instructions.md` (or `~/.vscode/copilot-instructions.md`)
+   - Paste the template content
+3. Alternatively, add the template to your workspace notes and reference it from your Copilot config
+
+This teaches Copilot to invoke `csr` automatically when collecting context for responses.
+
+## Command Reference
+
+### scan
+Index and catalog sessions from your workspace and VS Code session stores.
+
+```bash
+python csr.py scan
+```
+
+**What it does:**
+- Crawls specified workspace folders
+- Extracts session metadata from VS Code storage
+- Identifies touched files and small content excerpts
+- Indexes terminal history and commands
+- Updates the local database with new records
+
+### search
+Full-text search across all indexed sessions and artifacts.
+
+```bash
+python csr.py search "keyword"
+python csr.py search "function_name" --json
+```
+
+**Options:**
+- `--json`: Output results in JSON format
+- `--limit N`: Limit results to N records
+- Search term: Any keyword, function name, file path, or phrase
+
+**Returns:**
+- Matching sessions with relevant snippets
+- File records containing the keyword
+- Command history entries
+
+### show
+Display detailed information about a specific session.
+
+```bash
+python csr.py show <session_id>
+python csr.py show <session_id> --json
+```
+
+**Returns:**
+- Complete session metadata
+- All touched files with excerpts
+- Captured commands and terminal history
+- Checkpoints and snapshots
+- Tags and labels
+
+### export
+Export sessions or slices for backup, sharing, or archival.
+
+```bash
+python csr.py export
+python csr.py export --out sessions.ndjson
+python csr.py export --session <id> --format json
+```
+
+**Options:**
+- `--out <file>`: Output file path (default: sessions.ndjson)
+- `--session <id>`: Export single session (default: all)
+- `--format <format>`: json, ndjson, csv (default: ndjson)
+
+## Roadmap
+
+The tool is currently being moved from an earlier machine/user profile into a
+new VS Code Insiders environment. The roadmap therefore starts with discovery:
+`csr` should infer storage roots, workspace identity, and chat session ids from
+local VS Code/Copilot state instead of hard-coded paths or usernames.
+
+### Implemented Today
+
+The CLI currently exposes:
+
+```bash
+python csr.py scan
+python csr.py search "keyword" --json
+python csr.py list --json --limit 5
+python csr.py show <session_id> --json
+python csr.py export
+python csr.py health
+```
+
+`health` is currently a lightweight check that reports the index DB path,
+whether the default VS Code Stable workspace storage exists, and the current
+workspace.
+
+### Highest Priority
+
+- **VS Code storage discovery**: support Stable (`Code`), Insiders (`Code - Insiders`), and user-supplied roots. Discovery should use environment-derived paths such as `APPDATA`, `TERM_PROGRAM_VERSION`, `VSCODE_*`, and terminal/tool metadata captured in Copilot sessions.
+- **Session discovery**: infer active workspace/session data from `chat.ChatSessionStore.index`, `chatSessions/*.jsonl`, terminal command metadata, and conversation titles rather than hard-coded `WORKSPACE_CURRENT_CHAT_SESSION_ID` values.
+- **Environment-aware recall**: index Copilot terminal/tool records, including command, cwd, language, exit code, command URI, terminal output, and useful environment variables. This helps future scans locate the right database/session without guessing.
+- **Deterministic handoff compression**: implement `csr handoff <query>` as a local extractor plus heuristic compressor. It should emit compact agent-ready markdown from matched sessions, files, commands, errors, decisions, and next steps. See `docs/HANDOFF_DESIGN.md`.
+- **Documentation parity**: keep README, this file, `AGENTS-TEMPLATE.md`, and `csr --help` aligned with actual behavior.
+
+## Roadmap Commands (In Development)
+
+These commands and flags are documented in templates or implied by the current
+data model, but are not fully implemented yet:
+
+### handoff (Planned)
+Produce a compact markdown packet for a new agent from persisted local state.
+
+```bash
+python csr.py handoff "packet 007"
+python csr.py handoff "packet 007" --current-session
+python csr.py handoff "packet 007" --json
+```
+
+The handoff command should score and extract high-signal rows: headings, file
+paths, code blocks, commands, errors, decisions, TODO/next-step sentences,
+terminal tool records, edited files, and environment/storage clues.
+
+### files (Planned)
+List recently touched files with metadata.
+
+```bash
+python csr.py files --json --limit 10
+python csr.py files --days 7
+```
+
+### checkpoints (Planned)
+Search or list named checkpoints across all sessions.
+
+```bash
+python csr.py checkpoints --search "deploy"
+python csr.py checkpoints --session <id>
+```
+
+### enhanced health (Planned)
+Run an 8-dimension health check on the local datastore and index.
+
+```bash
+python csr.py health
+python csr.py health --verbose
+```
+
+### schema-check (Planned)
+Validate database schema and guide migrations after upgrades.
+
+```bash
+python csr.py schema-check
+python csr.py schema-check --validate
+python csr.py schema-check --migrate
+```
+
+### --days (Planned)
+Add convenient time filtering across query commands.
+
+```bash
+python csr.py search "database" --days 5
+python csr.py list --days 3 --json
+python csr.py files --days 7
+python csr.py checkpoints --days 3
+```
+
+## Architecture & Design
+
+### Storage
+- **Local-first**: All data stored locally in your workspace
+- **Privacy-focused**: No remote sync or cloud uploads by default
+- **Indexing**: SQLite or similar lightweight database for fast queries
+- **Session stores**: Integrates with VS Code's local session storage
+
+### Extractors & Extensibility
+The csr architecture supports modular extractors for different data sources:
+- VS Code session extractors
+- Workspace file monitors
+- Terminal history collectors
+- Custom checkpoint handlers
+
+New extractors and exporters can be added as plugins without modifying core code.
+
+### Data Flow
+```
+Workspace/Sessions → Extractors → Database → Indexer → Query Interface
+                                      ↓
+                              Full-text Search
+                                      ↓
+                              Results & Export
+```
+
+## Usage Examples
+
+### Example 1: Find Recent Work on Authentication
+```bash
+python csr.py search "auth"
+```
+
+Returns all sessions and files mentioning "auth" with relevant snippets.
+
+### Example 2: Recover a Specific Session
+```bash
+python csr.py show abc123def456 --json
+```
+
+Displays full details of session `abc123def456` in JSON format.
+
+### Example 3: Pre-Copilot Context Gathering
+```bash
+python csr.py files --limit 5 --json
+python csr.py search "database" --json
+```
+
+Run these, review the results, then include relevant snippets in your Copilot prompt.
+
+### Example 4: Backup & Export
+```bash
+python csr.py export --out my_sessions_backup.ndjson
+```
+
+Exports all indexed sessions to an NDJSON file for backup or sharing.
+
+### Example 5: Scheduled Scanning
+(Set up as a cron job or Windows Task Scheduler)
+
+```bash
+python csr.py scan
+```
+
+Run periodically (e.g., hourly or daily) to keep the index fresh with recent work.
+
+## Best Practices
+
+### Indexing
+- Run `scan` regularly (daily or after focused work sessions) to keep the index current
+- Use `--limit` flags to reduce output when searching for quick context
+- Leverage `--json` output for programmatic processing
+
+### Searching
+- Use specific keywords to narrow results (e.g., function names, file paths)
+- Start with focused searches rather than broad queries
+- Review search results before passing to LLMs
+
+### Session Management
+- Use checkpoints to create named snapshots during work on complex features
+- Tag sessions for easier retrieval later
+- Export completed sessions for archival before clearing local data
+
+### VS Code Integration
+- Install the Copilot template in your workspace to automate context collection
+- Run `csr search` before each Copilot prompt to surface relevant prior work
+- Use exported sessions as supplementary context for offline analysis
+
+## Limitations & Constraints
+
+- **Local only**: No built-in cloud sync; export manually for remote backup
+- **Workspace-scoped**: Primarily designed for single-workspace indexing (multi-workspace support in roadmap)
+- **Privacy trade-offs**: Full-text search on code means searching is local but data is comprehensive
+
+## Contributing & Extensions
+
+The csr codebase is intentionally minimal to encourage extensions:
+- Add new extractors for additional data sources
+- Create custom exporters for different formats
+- Build plugins for tighter IDE integration
+- Contribute improvements via pull requests
+
+## File Structure
+
+```
+code-session-recall/
+├── csr.py                    # Main CLI entry point
+├── README.md                 # Quick start guide
+├── AGENTS-TEMPLATE.md        # Copilot integration template
+├── AGENTS.md                 # Agent orientation notes
+├── docs/
+│   ├── TOOL_DOCUMENTATION.md # This file
+│   ├── ENVIRONMENT_DISCOVERY.md
+│   └── HANDOFF_DESIGN.md
+└── tools/
+    └── exploratory/          # Historical local investigation probes
+        ├── search_copilot_chats.py
+        ├── search_workspace_storage.py
+        ├── inspect_db.py
+        ├── query_db.py
+        ├── inspect_state_db.py
+        ├── list_state_dbs.py
+        ├── find_in_db.py
+        └── decode_probe.py
+```
+
+## Troubleshooting
+
+### Index is Stale
+Run `python csr.py scan` to re-index recent work.
+
+### Search Returns No Results
+- Verify the workspace path is correct
+- Run `scan` to ensure data is indexed
+- Try broader search terms
+- Use `--json` to see raw query results
+
+### Database Issues
+Use `inspect_db.py` to examine database state and integrity.
+
+### Performance Issues
+- Limit search results with `--limit`
+- Run scans during off-peak times
+- Consider exporting and archiving old sessions
+
+## FAQ
+
+**Q: Is my code uploaded to the cloud?**
+A: No. csr is local-only by default. Data never leaves your machine unless you explicitly export it.
+
+**Q: How often should I run `scan`?**
+A: After focused work sessions, or set up a scheduled daily scan for continuous coverage.
+
+**Q: Can I search across multiple workspaces?**
+A: Currently designed for single-workspace scanning. Multi-workspace support is on the roadmap.
+
+**Q: How do I integrate this with my editor?**
+A: Use the `AGENTS-TEMPLATE.md` content in your VS Code/Copilot configuration to automate context retrieval.
+
+**Q: What if I want to delete old sessions?**
+A: Export important sessions first, then manually remove them from the database using `inspect_db.py`.
+
+## License & Attribution
+
+(License and contributor information to be added)
+
+## Related Documentation
+
+- [VS Code Session Storage](https://code.visualstudio.com/docs/editor/settings-sync)
+- [GitHub Copilot Documentation](https://docs.github.com/en/copilot)
+- [SQLite Documentation](https://www.sqlite.org/docs.html)
