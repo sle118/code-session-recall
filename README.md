@@ -56,6 +56,14 @@ python csr.py install-instructions
 snippet to give another coding agent so CSR becomes the first recall step in a
 workspace.
 
+Release and publishing
+----------------------
+
+GitHub Actions builds and checks the package on every push to `main` and every
+pull request. PyPI publishing is intentionally tag-driven: bump
+`pyproject.toml`, push the commit, then push a matching tag such as `v0.1.1`.
+See `docs/RELEASE.md` for the Trusted Publishing setup and release checklist.
+
 VS Code + GitHub Copilot integration
 - This tool is designed to complement the GitHub Copilot extension in Visual Studio Code. Use `csr` to surface local session context before invoking Copilot so prompts sent to Copilot are focused and cheaper.
 - Installation pattern: place the `AGENTS-TEMPLATE.md` content into `~/.copilot/copilot-instructions.md` (or append it) to teach Copilot to run `csr` first on each prompt. Alternately, copy the template into your workspace notes and reference it from your Copilot config.
