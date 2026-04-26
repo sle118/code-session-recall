@@ -69,6 +69,7 @@ For local development or pre-release testing from a clone:
 ```bash
 python -m pip install -e .
 csr --help
+csr install-instructions
 ```
 
 The repository-local compatibility form remains available:
@@ -169,6 +170,7 @@ python csr.py ask "question" --json
 python csr.py search "keyword" --json
 python csr.py list --json --limit 5
 python csr.py show <session_id> --json
+python csr.py install-instructions
 python csr.py export
 python csr.py health
 ```
@@ -234,6 +236,15 @@ high-signal indexed sessions.
 `ask` is a compatibility alias for `handoff`. It exists because agents often
 try natural command names during recall. It does not add LLM behavior or a new
 provider; it emits the same deterministic packet.
+
+### install-instructions
+Print a ready-to-paste bootstrap prompt and AGENTS.md snippet for activating CSR
+in another workspace.
+
+```bash
+csr install-instructions
+python csr.py install-instructions
+```
 
 ### files (Planned)
 List recently touched files with metadata.

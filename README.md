@@ -34,6 +34,7 @@ Once published to PyPI:
 ```bash
 python -m pip install code-session-recall
 csr handoff
+csr install-instructions
 ```
 
 For local development or pre-release testing from a clone:
@@ -41,13 +42,19 @@ For local development or pre-release testing from a clone:
 ```bash
 python -m pip install -e .
 csr --help
+csr install-instructions
 ```
 
 The repository-local entry point remains available:
 
 ```bash
 python csr.py handoff
+python csr.py install-instructions
 ```
+
+`csr install-instructions` prints the exact bootstrap prompt and AGENTS.md
+snippet to give another coding agent so CSR becomes the first recall step in a
+workspace.
 
 VS Code + GitHub Copilot integration
 - This tool is designed to complement the GitHub Copilot extension in Visual Studio Code. Use `csr` to surface local session context before invoking Copilot so prompts sent to Copilot are focused and cheaper.
@@ -87,6 +94,7 @@ python csr.py ask "question" --json
 python csr.py handoff "keyword" --json
 python csr.py search "keyword"
 python csr.py show <id> --json
+python csr.py install-instructions
 python csr.py export --out sessions.ndjson
 
 Roadmap

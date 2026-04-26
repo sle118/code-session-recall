@@ -2322,6 +2322,48 @@ def cmd_health():
     print("Workspace:", os.getcwd())
 
 
+def cmd_install_instructions():
+    print("""# Code Session Recall Agent Bootstrap
+
+Use this prompt when asking an agent to install or activate CSR in a workspace:
+
+```text
+Install and activate code-session-recall for this workspace.
+
+First try the installed CLI:
+  csr --help
+
+If `csr` is unavailable, install it:
+  python -m pip install code-session-recall
+
+If package install is unavailable but this repository is present in the
+workspace, read and execute:
+  code-session-recall/docs/INSTALL.md
+
+Then update the workspace's top-level AGENTS.md or equivalent instructions with
+a prominent Session Recall section near the top. Do not bury CSR in a secondary
+tools list.
+```
+
+Add this near the top of AGENTS.md:
+
+```markdown
+## Session Recall - Run First
+
+Before broad searches or fresh reasoning, run `csr handoff "<prompt summary>"`.
+If unsure what to search for, run `csr handoff`. Use the result as orientation
+context, then continue with targeted inspection.
+```
+
+After updating instructions, verify:
+
+```bash
+csr handoff
+csr list --json --limit 5
+```
+""")
+
+
 # ----------------------------
 # CLI
 # ----------------------------
@@ -2377,6 +2419,7 @@ def main():
     pexport.add_argument('--include-excluded-sessions', action='store_true', help='include sessions from the workspace exclusion block')
     pexport.add_argument('--exclude-session', action='append', help='exclude a specific chat session id (repeatable)')
     sub.add_parser('health', help='show health info')
+    sub.add_parser('install-instructions', help='print agent bootstrap instructions for installing/activating csr')
 
     args = parser.parse_args()
 
@@ -2473,6 +2516,9 @@ def main():
 
     elif args.cmd == 'health':
         cmd_health()
+
+    elif args.cmd == 'install-instructions':
+        cmd_install_instructions()
 
     else:
         parser.print_help()

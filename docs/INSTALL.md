@@ -20,6 +20,7 @@ Preferred install, once the package is published:
 ```powershell
 python -m pip install code-session-recall
 csr --help
+csr install-instructions
 ```
 
 For local development or pre-release testing from a clone:
@@ -27,6 +28,7 @@ For local development or pre-release testing from a clone:
 ```powershell
 python -m pip install -e .
 csr --help
+csr install-instructions
 ```
 
 When installing `code-session-recall` as a workspace-local tool, first make sure
@@ -45,13 +47,15 @@ From the downstream workspace root:
 
 1. Prefer the packaged CLI: run `csr --help`.
 2. If `csr` is unavailable, install with `python -m pip install code-session-recall` or `python -m pip install -e <path-to-code-session-recall>`.
-3. If package install is unavailable, confirm `code-session-recall/csr.py` exists.
-4. Add ignore rules for the installed tool folder and local wrapper command.
-5. Try to create or update a workspace-local wrapper command.
-6. Verify the wrapper with `./csr --help` or `./csr.ps1 --help`.
-7. Merge `code-session-recall/AGENTS-TEMPLATE.md` into the top-level
+3. If `csr` works, run `csr install-instructions` and use that output as the
+   bootstrap prompt/instruction snippet.
+4. If package install is unavailable, confirm `code-session-recall/csr.py` exists.
+5. Add ignore rules for the installed tool folder and local wrapper command.
+6. Try to create or update a workspace-local wrapper command.
+7. Verify the wrapper with `./csr --help` or `./csr.ps1 --help`.
+8. Merge `code-session-recall/AGENTS-TEMPLATE.md` into the top-level
    instructions.
-8. If the packaged CLI or wrapper works, write the merged instructions with
+9. If the packaged CLI or wrapper works, write the merged instructions with
    short `csr` commands. If both fail, keep the explicit
    `python code-session-recall/csr.py` commands.
 
@@ -115,6 +119,13 @@ If the PowerShell execution policy blocks local scripts, skip the wrapper and
 use the explicit Python command form in agent instructions.
 
 ## Instruction Merge
+
+The packaged CLI can print the exact bootstrap prompt and top-of-file AGENTS
+snippet:
+
+```powershell
+csr install-instructions
+```
 
 Place a short pointer near the top of the downstream `AGENTS.md` or equivalent
 instructions file, before long tool lists or project notes. This keeps CSR from
