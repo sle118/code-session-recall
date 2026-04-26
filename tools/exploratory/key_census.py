@@ -249,9 +249,25 @@ def print_table(summary, limit):
         )
 
 
+def filter_summary(summary, patterns=None, only_signal=False):
+    patterns = [item.lower() for item in (patterns or []) if item]
+    keys = []
+    for item in summary["keys"]:
+        if patterns and not any(pattern in item["key"].lower() for pattern in patterns):
+            continue
+        if only_signal and not any(
+            item.get(flag, 0) for flag in ("has_path", "has_command", "has_error", "has_todo", "has_timestamp")
+        ):
+            continue
+        keys.append(item)
+    return {**summary, "keys": keys}
+
+
 def main():
     parser = argparse.ArgumentParser(description="Census VS Code state keys without printing raw values.")
     parser.add_argument("--limit", type=int, default=40, help="max keys to print")
+    parser.add_argument("--match", action="append", default=[], help="case-insensitive key substring filter; repeatable")
+    parser.add_argument("--only-signal", action="store_true", help="only show keys with path/command/error/todo/timestamp signals")
     parser.add_argument("--json", action="store_true", dest="json_out", help="print sanitized JSON summary")
     parser.add_argument("--raw-out", default=str(default_raw_path()), help="raw ignored output path")
     parser.add_argument("--sample-chars", type=int, default=500, help="raw sample chars per row")
@@ -266,10 +282,12 @@ def main():
         "raw_records": raw_records,
     }, ensure_ascii=False, indent=2), encoding="utf-8")
 
+    filtered = filter_summary(summary, patterns=args.match, only_signal=args.only_signal)
+
     if args.json_out:
-        print(json.dumps(summary, ensure_ascii=False, indent=2))
+        print(json.dumps(filtered, ensure_ascii=False, indent=2))
     else:
-        print_table(summary, args.limit)
+        print_table(filtered, args.limit)
         print()
         print(f"Raw detail written to ignored path: {sanitize_text(raw_path)}")
 

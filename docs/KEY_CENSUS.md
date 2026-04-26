@@ -23,6 +23,20 @@ python tools/exploratory/key_census.py --json > unsanitized/key-census-summary.j
 The JSON summary is still intended as local discovery output unless it has been
 reviewed and sanitized.
 
+For targeted rechecks after creating Copilot todos, terminal activity, or
+subagent activity, filter the summary by key family:
+
+```powershell
+python tools/exploratory/key_census.py --match todo --match chat --match agent --match terminal --limit 80
+```
+
+To show only matching keys that contain path, command, error, todo, or timestamp
+signals:
+
+```powershell
+python tools/exploratory/key_census.py --match todo --match chat --match agent --match terminal --only-signal --limit 80
+```
+
 ## What To Look For
 
 Prioritize keys that are frequent or high-signal:
