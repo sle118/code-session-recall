@@ -20,6 +20,7 @@ venv/
 *.ndjson
 *.out
 *.tmp
+unsanitized/
 
 # Editor / OS / workspace
 .vscode/

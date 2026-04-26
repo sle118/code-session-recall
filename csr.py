@@ -363,6 +363,159 @@ def append_unique_text(target, text):
         target.append(text)
 
 
+PATH_RE = re.compile(
+    r'(?i)(?:[A-Z]:\\[^\s"<>|]+|/(?:home|users|mnt|var|tmp|etc|opt|workspace|workspaces)/[^\s"<>|]+|/[a-z]/[^\s"<>|]+|[\w./\\-]+\.(?:py|md|json|jsonl|sqlite|vscdb|txt|ps1|sh|ts|tsx|js|jsx|yaml|yml))'
+)
+COMMAND_RE = re.compile(r'(?i)\b(?:python|py|git|rg|grep|find|Get-ChildItem|Select-String|npm|pnpm|yarn|pytest|pip|uv|csr)\b')
+COMMAND_LINE_RE = re.compile(r'(?i)^\s*(?:[-*]\s*)?`?(?:(?:python|py|git|rg|grep|find|Get-ChildItem|Select-String|npm|pnpm|yarn|pytest|pip|uv)\b|csr\s+[a-z][\w-]*)')
+ERROR_RE = re.compile(r'(?i)\b(?:error|exception|traceback|failed|denied|missing|timeout|out of memory|heap|not found|exit code [1-9])\b')
+NEXT_RE = re.compile(r'(?i)\b(?:todo|next|follow-?up|roadmap|planned|blocked|issue|fixme|later)\b')
+DECISION_RE = re.compile(r'(?i)\b(?:decision|decided|choose|chosen|approach|rationale|tradeoff|trade-off|we will|should)\b')
+
+
+def add_unique_limited(target, value, limit=20):
+    value = stringify_text(value).strip()
+    if not value or value in target:
+        return
+    if len(target) < limit:
+        target.append(value)
+
+
+def uri_to_path(value):
+    if not isinstance(value, dict):
+        return None
+    path = value.get('fsPath') or value.get('path') or value.get('external')
+    if not path:
+        return None
+    path = str(path)
+    if path.startswith('file:///'):
+        path = path.replace('file:///', '', 1)
+    return path
+
+
+def collect_uri_paths(obj, out=None, depth=0):
+    if out is None:
+        out = []
+    if depth > 8:
+        return out
+    if isinstance(obj, dict):
+        path = uri_to_path(obj)
+        if path:
+            add_unique_limited(out, path, limit=50)
+        for value in obj.values():
+            collect_uri_paths(value, out=out, depth=depth + 1)
+    elif isinstance(obj, list):
+        for item in obj:
+            collect_uri_paths(item, out=out, depth=depth + 1)
+    return out
+
+
+def extract_paths_from_text(text, limit=30):
+    out = []
+    for match in PATH_RE.findall(stringify_text(text)):
+        cleaned = match.rstrip('.,;:)')
+        add_unique_limited(out, cleaned, limit=limit)
+    return out
+
+
+def high_signal_lines(text, query=None, limit=12):
+    query_l = (query or '').lower().strip()
+    scored = []
+    for line in stringify_text(text).splitlines():
+        original = line.strip()
+        if not original:
+            continue
+        line_l = original.lower()
+        score = 0
+        if query_l and query_l in line_l:
+            score += 8
+        if original.startswith('#'):
+            score += 4
+        if PATH_RE.search(original):
+            score += 5
+        if COMMAND_LINE_RE.search(original):
+            score += 4
+        if ERROR_RE.search(original):
+            score += 7
+        if NEXT_RE.search(original):
+            score += 5
+        if DECISION_RE.search(original):
+            score += 3
+        if '`' in original or re.search(r'\b[A-Za-z_][A-Za-z0-9_]{3,}\b', original):
+            score += 1
+        if score:
+            scored.append((score, len(scored), clip_text(original, 260)))
+
+    scored.sort(key=lambda item: (-item[0], item[1]))
+    return unique_preserve_order([item[2] for item in scored[:limit]])
+
+
+def classify_fact_line(line):
+    if ERROR_RE.search(line):
+        return 'errors'
+    if COMMAND_LINE_RE.search(line):
+        return 'commands'
+    if NEXT_RE.search(line) or DECISION_RE.search(line):
+        return 'nextSteps'
+    return 'highlights'
+
+
+def extract_facts_from_text(text, query=None):
+    facts = {
+        'files': extract_paths_from_text(text),
+        'commands': [],
+        'errors': [],
+        'nextSteps': [],
+        'highlights': [],
+    }
+    for line in high_signal_lines(text, query=query, limit=20):
+        add_unique_limited(facts[classify_fact_line(line)], line, limit=12)
+    return facts
+
+
+def merge_facts(target, source, limit=20):
+    for key, values in (source or {}).items():
+        if key not in target:
+            target[key] = []
+        for value in values or []:
+            if key == 'toolEvents' and isinstance(value, dict):
+                marker = json.dumps(value, sort_keys=True, ensure_ascii=False)
+                existing = {
+                    json.dumps(item, sort_keys=True, ensure_ascii=False)
+                    for item in target[key]
+                    if isinstance(item, dict)
+                }
+                if marker not in existing and len(target[key]) < limit:
+                    target[key].append(value)
+            else:
+                add_unique_limited(target[key], value, limit=limit)
+    return target
+
+
+def summarize_tool_invocation(part):
+    if not isinstance(part, dict):
+        return None
+    data = part.get('toolSpecificData') or {}
+    command_line = data.get('commandLine') or {}
+    state = data.get('terminalCommandState') or {}
+    cwd = uri_to_path(data.get('cwd')) or stringify_text(data.get('cwd')).strip()
+    event = {
+        'kind': data.get('kind') or part.get('toolId') or 'tool',
+        'toolId': part.get('toolId'),
+        'command': command_line.get('original') or command_line.get('forDisplay'),
+        'cwd': cwd or None,
+        'language': data.get('language'),
+        'exitCode': state.get('exitCode'),
+        'durationMs': state.get('duration'),
+        'uri': data.get('terminalCommandUri'),
+    }
+    output = (data.get('terminalCommandOutput') or {}).get('text')
+    if output:
+        event['outputHighlights'] = high_signal_lines(output, limit=8)
+        event['outputLineCount'] = (data.get('terminalCommandOutput') or {}).get('lineCount')
+    return {k: v for k, v in event.items() if v not in (None, '', [], {})}
+
+
 def entry_timestamp_iso(entry):
     if not isinstance(entry, dict):
         return None
@@ -468,6 +621,7 @@ def load_chat_session_state(jsonl_path):
 def extract_response_parts(response_parts):
     assistant_texts = []
     tool_texts = []
+    tool_events = []
 
     for part in response_parts or []:
         if not isinstance(part, dict):
@@ -484,11 +638,14 @@ def extract_response_parts(response_parts):
             invocation = invocation_message.get('value') if isinstance(invocation_message, dict) else invocation_message
             past = past_tense_message.get('value') if isinstance(past_tense_message, dict) else past_tense_message
             append_unique_text(tool_texts, past or invocation)
+            event = summarize_tool_invocation(part)
+            if event:
+                tool_events.append(event)
             continue
 
         append_unique_text(assistant_texts, part.get('value'))
 
-    return assistant_texts, tool_texts
+    return assistant_texts, tool_texts, tool_events
 
 
 def parse_chat_session_state(state, entry=None):
@@ -503,6 +660,15 @@ def parse_chat_session_state(state, entry=None):
     all_models = []
     timestamps = []
     search_chunks = []
+    facts = {
+        'files': [],
+        'commands': [],
+        'errors': [],
+        'nextSteps': [],
+        'highlights': [],
+        'editedFiles': [],
+        'toolEvents': [],
+    }
 
     for i, request in enumerate(requests):
         if not isinstance(request, dict):
@@ -511,11 +677,47 @@ def parse_chat_session_state(state, entry=None):
         message = request.get('message') or {}
         user_text = stringify_text(message.get('text')).strip()
         result = request.get('result') or {}
-        assistant_texts, tool_texts = extract_response_parts(request.get('response') or [])
+        assistant_texts, tool_texts, tool_events = extract_response_parts(request.get('response') or [])
         append_unique_text(assistant_texts, result.get('response'))
 
         if not user_text and not assistant_texts and not tool_texts:
             continue
+
+        request_facts = {
+            'files': [],
+            'commands': [],
+            'errors': [],
+            'nextSteps': [],
+            'highlights': [],
+            'editedFiles': [],
+            'toolEvents': [],
+        }
+        merge_facts(request_facts, extract_facts_from_text(user_text), limit=12)
+        for text in assistant_texts:
+            merge_facts(request_facts, extract_facts_from_text(text), limit=12)
+        for text in tool_texts:
+            merge_facts(request_facts, extract_facts_from_text(text), limit=12)
+
+        edited_files = []
+        for event in request.get('editedFileEvents') or []:
+            if isinstance(event, dict):
+                path = uri_to_path(event.get('uri'))
+                if path:
+                    add_unique_limited(edited_files, path, limit=20)
+        for path in collect_uri_paths(request.get('contentReferences') or []):
+            add_unique_limited(request_facts['files'], path, limit=20)
+        for path in edited_files:
+            add_unique_limited(request_facts['editedFiles'], path, limit=20)
+            add_unique_limited(request_facts['files'], path, limit=20)
+
+        for event in tool_events:
+            request_facts['toolEvents'].append(event)
+            if event.get('command'):
+                add_unique_limited(request_facts['commands'], event.get('command'), limit=20)
+            if event.get('cwd'):
+                add_unique_limited(request_facts['files'], event.get('cwd'), limit=20)
+            for line in event.get('outputHighlights') or []:
+                add_unique_limited(request_facts[classify_fact_line(line)], line, limit=12)
 
         model_id = request.get('modelId') or (state.get('inputState') or {}).get('selectedModel', {}).get('identifier')
         if model_id:
@@ -533,6 +735,8 @@ def parse_chat_session_state(state, entry=None):
             'assistantTexts': assistant_texts,
             'assistantPreview': clip_text(' '.join(assistant_texts), 240) if assistant_texts else '',
             'toolEventCount': len(tool_texts),
+            'toolEvents': tool_events[:8],
+            'facts': {k: v for k, v in request_facts.items() if v},
             'modelId': model_id,
         }
 
@@ -546,6 +750,14 @@ def parse_chat_session_state(state, entry=None):
             search_chunks.append(f"USER\n{user_text}")
         for text in assistant_texts:
             search_chunks.append(f"ASSISTANT\n{text}")
+        for text in tool_texts:
+            search_chunks.append(f"TOOL\n{text}")
+        for event in tool_events:
+            if event.get('command'):
+                search_chunks.append(f"COMMAND\n{event.get('command')}")
+            for line in event.get('outputHighlights') or []:
+                search_chunks.append(f"TOOL_OUTPUT\n{line}")
+        merge_facts(facts, request_facts, limit=30)
 
     if not normalized_requests:
         return None
@@ -576,6 +788,7 @@ def parse_chat_session_state(state, entry=None):
 
     return {
         'summary': summary,
+        'facts': {k: v for k, v in facts.items() if v},
         'recentRequests': normalized_requests[-8:],
         'requests': normalized_requests,
         'searchText': '\n\n'.join(search_chunks),
@@ -588,6 +801,7 @@ def format_chat_session_transcript(state, title=None, entry=None):
         return format_raw_payload(state)
 
     summary = envelope.get('summary') or {}
+    facts = envelope.get('facts') or {}
     lines = []
     lines.append('# CHAT SESSION')
     if title:
@@ -603,23 +817,72 @@ def format_chat_session_transcript(state, title=None, entry=None):
         lines.append(f"Last assistant reply: {summary.get('lastAssistantReply')}")
     lines.append('')
 
+    def add_section(label, values, limit=10):
+        values = values or []
+        if not values:
+            return
+        lines.append(f'{label}:')
+        for value in values[:limit]:
+            lines.append(f'- {value}')
+        lines.append('')
+
+    add_section('Files mentioned', facts.get('files'), limit=12)
+    add_section('Edited files', facts.get('editedFiles'), limit=12)
+    add_section('Commands mentioned', facts.get('commands'), limit=10)
+    add_section('Errors mentioned', facts.get('errors'), limit=8)
+    add_section('Decisions / next steps', facts.get('nextSteps'), limit=10)
+    add_section('Other high-signal lines', facts.get('highlights'), limit=8)
+
+    if facts.get('toolEvents'):
+        lines.append('Tool events:')
+        for event in facts.get('toolEvents', [])[:8]:
+            bits = []
+            if event.get('kind'):
+                bits.append(str(event.get('kind')))
+            if event.get('command'):
+                bits.append(f"command={event.get('command')}")
+            if event.get('exitCode') is not None:
+                bits.append(f"exit={event.get('exitCode')}")
+            if event.get('durationMs') is not None:
+                bits.append(f"durationMs={event.get('durationMs')}")
+            if event.get('cwd'):
+                bits.append(f"cwd={event.get('cwd')}")
+            lines.append(f"- {' | '.join(bits)}")
+            for line in event.get('outputHighlights') or []:
+                lines.append(f"  output: {line}")
+        lines.append('')
+
     lines.append('Recent turns:')
     for item in envelope.get('recentRequests') or []:
         ts_iso = item.get('ts') or 'unknown-time'
         lines.append(f"- {ts_iso} | turn={item.get('i')} | model={item.get('modelId') or '-'}")
-        if item.get('userText'):
-            lines.append('  USER:')
-            for line in item['userText'].splitlines() or ['']:
-                lines.append(f'    {line}')
-        if item.get('assistantTexts'):
-            lines.append('  ASSISTANT:')
-            for text in item.get('assistantTexts') or []:
-                for line in text.splitlines() or ['']:
-                    lines.append(f'    {line}')
+        if item.get('userPreview'):
+            lines.append(f"  USER: {item.get('userPreview')}")
+        if item.get('assistantPreview'):
+            lines.append(f"  ASSISTANT: {item.get('assistantPreview')}")
+        turn_facts = item.get('facts') or {}
+        for label, key in (
+            ('files', 'files'),
+            ('commands', 'commands'),
+            ('errors', 'errors'),
+            ('next', 'nextSteps'),
+        ):
+            values = turn_facts.get(key) or []
+            if values:
+                lines.append(f"  {label}: {'; '.join(values[:3])}")
         lines.append('')
 
     json_payload = {
         'summary': summary,
+        'facts': {
+            'files': (facts.get('files') or [])[:20],
+            'editedFiles': (facts.get('editedFiles') or [])[:20],
+            'commands': (facts.get('commands') or [])[:20],
+            'errors': (facts.get('errors') or [])[:20],
+            'nextSteps': (facts.get('nextSteps') or [])[:20],
+            'highlights': (facts.get('highlights') or [])[:20],
+            'toolEvents': (facts.get('toolEvents') or [])[:12],
+        },
         'recentRequests': [
             {
                 'i': item.get('i'),
@@ -629,6 +892,7 @@ def format_chat_session_transcript(state, title=None, entry=None):
                 'userPreview': item.get('userPreview'),
                 'assistantPreview': item.get('assistantPreview'),
                 'toolEventCount': item.get('toolEventCount'),
+                'facts': item.get('facts'),
                 'modelId': item.get('modelId'),
             }
             for item in envelope.get('recentRequests') or []
@@ -1462,6 +1726,280 @@ def cmd_search(q, limit=10, sources=None, json_out=False, exact=False, since=Non
         print("")
 
 
+def sanitize_handoff_text(value):
+    text = stringify_text(value)
+    replacements = []
+    for name in ('USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'TEMP', 'TMP'):
+        env_value = os.getenv(name)
+        if env_value:
+            replacements.append((env_value, f'%{name}%'))
+            replacements.append((env_value.replace('\\', '/'), f'%{name}%'))
+    username = os.getenv('USERNAME')
+    if username:
+        replacements.append((f'\\Users\\{username}\\', r'\Users\<USER>\\'))
+        replacements.append((f'/Users/{username}/', '/Users/<USER>/'))
+    computer = os.getenv('COMPUTERNAME')
+    if computer:
+        replacements.append((computer, '<COMPUTER>'))
+
+    for old, new in replacements:
+        text = text.replace(old, new)
+    return text
+
+
+def get_handoff_candidate_rows(query=None, limit=8, sources=None):
+    conn = db()
+    c = conn.cursor()
+    rows = []
+    seen = set()
+
+    def add_source_filter(sql, params):
+        if sources:
+            placeholders = ','.join('?' for _ in sources)
+            sql += f" AND sessions.source IN ({placeholders})"
+            params.extend(sources)
+        return sql, params
+
+    if query:
+        qlike = '%' + query.lower() + '%'
+        try:
+            params = [qlike]
+            sql = """
+            SELECT sessions.id, sessions.source, sessions.path, sessions.chat_session_id, sessions.title, sessions.created_at, coalesce(sessions.display_content, messages.content)
+            FROM sessions
+            JOIN messages ON sessions.id = messages.session_id
+            WHERE lower(coalesce(sessions.title, '')) LIKE ?
+            """
+            sql, params = add_source_filter(sql, params)
+            sql += " ORDER BY sessions.created_at DESC LIMIT ?"
+            params.append(limit)
+            for row in c.execute(sql, tuple(params)).fetchall():
+                if row[0] not in seen:
+                    rows.append(row)
+                    seen.add(row[0])
+        except Exception:
+            pass
+
+        try:
+            params = [query]
+            sql = """
+            SELECT sessions.id, sessions.source, sessions.path, sessions.chat_session_id, sessions.title, sessions.created_at, coalesce(sessions.display_content, messages.content)
+            FROM messages
+            JOIN sessions ON sessions.id = messages.session_id
+            WHERE messages MATCH ?
+            """
+            sql, params = add_source_filter(sql, params)
+            sql += " LIMIT ?"
+            params.append(limit * 2)
+            for row in c.execute(sql, tuple(params)).fetchall():
+                if row[0] not in seen:
+                    rows.append(row)
+                    seen.add(row[0])
+        except Exception:
+            pass
+
+        try:
+            params = [qlike]
+            sql = """
+            SELECT sessions.id, sessions.source, sessions.path, sessions.chat_session_id, sessions.title, sessions.created_at, coalesce(sessions.display_content, messages.content)
+            FROM messages
+            JOIN sessions ON sessions.id = messages.session_id
+            WHERE lower(messages.content) LIKE ?
+            """
+            sql, params = add_source_filter(sql, params)
+            sql += " ORDER BY sessions.created_at DESC LIMIT ?"
+            params.append(limit * 2)
+            for row in c.execute(sql, tuple(params)).fetchall():
+                if row[0] not in seen:
+                    rows.append(row)
+                    seen.add(row[0])
+        except Exception:
+            pass
+    else:
+        try:
+            params = []
+            sql = """
+            SELECT sessions.id, sessions.source, sessions.path, sessions.chat_session_id, sessions.title, sessions.created_at, coalesce(sessions.display_content, messages.content)
+            FROM sessions
+            JOIN messages ON sessions.id = messages.session_id
+            WHERE 1=1
+            """
+            sql, params = add_source_filter(sql, params)
+            sql += " ORDER BY sessions.created_at DESC LIMIT ?"
+            params.append(limit * 2)
+            rows = c.execute(sql, tuple(params)).fetchall()
+        except Exception:
+            rows = []
+
+    return rows
+
+
+def score_handoff_row(row, query=None):
+    sid, source, path, chat_session_id, title, created_at, content = row
+    content = content or ''
+    facts = extract_facts_from_text(content, query=query)
+    query_l = (query or '').lower().strip()
+    haystack = ' '.join([str(title or ''), str(path or ''), content]).lower()
+
+    score = 0
+    if query_l and query_l in haystack:
+        score += 20
+    if title and query_l and query_l in title.lower():
+        score += 10
+    if source in ('vscode-copilot', 'vscode-live', 'copilot-artifact'):
+        score += 25
+    elif source == 'markdown':
+        score -= 8
+    score += min(len(facts.get('files') or []), 6) * 3
+    score += min(len(facts.get('commands') or []), 6) * 4
+    score += min(len(facts.get('errors') or []), 6) * 6
+    score += min(len(facts.get('nextSteps') or []), 6) * 4
+    score += min(len(facts.get('highlights') or []), 6)
+
+    parsed_created = parse_timestamp(created_at)
+    if parsed_created:
+        # Small deterministic recency bump; enough to break ties, not enough to
+        # swamp exact query or operational facts.
+        score += max(0, min(5, int(parsed_created.timestamp() // 86400) % 6))
+
+    return score, facts
+
+
+def score_handoff_value(value, query=None):
+    text = stringify_text(value)
+    score = 0
+    query_l = (query or '').lower().strip()
+    lower = text.lower()
+    if query_l and query_l in lower:
+        score += 10
+    if PATH_RE.search(text):
+        score += 4
+    if COMMAND_LINE_RE.search(text):
+        score += 5
+    if ERROR_RE.search(text):
+        score += 8
+    if NEXT_RE.search(text) or DECISION_RE.search(text):
+        score += 6
+    return score
+
+
+def select_scored_values(values, query=None, limit=8):
+    scored = []
+    for i, value in enumerate(values or []):
+        scored.append((score_handoff_value(value, query=query), i, sanitize_handoff_text(value)))
+    scored.sort(key=lambda item: (-item[0], item[1]))
+    return unique_preserve_order([item[2] for item in scored if item[0] > 0][:limit])
+
+
+def cmd_handoff(query=None, limit=5, sources=None, json_out=False):
+    rows = get_handoff_candidate_rows(query=query, limit=limit, sources=sources)
+    scored_rows = []
+    for row in rows:
+        score, facts = score_handoff_row(row, query=query)
+        scored_rows.append((score, row, facts))
+    scored_rows.sort(key=lambda item: (-item[0], item[1][5] or ''))
+    scored_rows = scored_rows[:limit]
+
+    if not scored_rows:
+        message = {
+            'query': query or '',
+            'message': 'No indexed sessions matched. Run `python csr.py scan`, try a broader query, or inspect the workspace normally.',
+        }
+        if json_out:
+            print(json.dumps(message, ensure_ascii=False, indent=2))
+        else:
+            print('# Agent Handoff')
+            print()
+            print('## Query')
+            print(query or '(recent/high-signal fallback)')
+            print()
+            print('No indexed sessions matched. Run `python csr.py scan`, try a broader query, or inspect the workspace normally.')
+        return
+
+    aggregate = {
+        'files': [],
+        'commands': [],
+        'errors': [],
+        'nextSteps': [],
+        'highlights': [],
+    }
+    sessions = []
+    for score, row, facts in scored_rows:
+        sid, source, path, chat_session_id, title, created_at, content = row
+        sessions.append({
+            'id': sid,
+            'score': score,
+            'source': source,
+            'title': sanitize_handoff_text(title or ''),
+            'created_at': created_at,
+            'path': sanitize_handoff_text(path or ''),
+        })
+        for key in aggregate:
+            for value in facts.get(key) or []:
+                add_unique_limited(aggregate[key], value, limit=40)
+
+    files = select_scored_values(aggregate.get('files'), query=query, limit=12)
+    commands = select_scored_values(aggregate.get('commands'), query=query, limit=10)
+    errors = select_scored_values(aggregate.get('errors'), query=query, limit=8)
+    next_steps = select_scored_values(aggregate.get('nextSteps'), query=query, limit=10)
+    highlights = select_scored_values(aggregate.get('highlights'), query=query, limit=8)
+
+    suggested = 'Inspect the likely files/session above, then continue from the decisions and errors listed here.'
+    if errors:
+        suggested = 'Start by resolving or confirming the listed errors, then inspect the likely files/session above.'
+    elif next_steps:
+        suggested = 'Continue from the listed decisions / next steps and inspect the likely files/session above.'
+    elif not query:
+        suggested = 'Use these recent/high-signal sessions as pre-reasoning context, then run a narrower handoff query if needed.'
+
+    payload = {
+        'query': query or '',
+        'sessions': sessions,
+        'files': files,
+        'commands': commands,
+        'errors': errors,
+        'nextSteps': next_steps,
+        'highlights': highlights,
+        'suggestedNextAction': suggested,
+    }
+    if json_out:
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        return
+
+    def section(label, values):
+        print()
+        print(f'## {label}')
+        if not values:
+            print('- None found')
+            return
+        for value in values:
+            print(f'- {value}')
+
+    print('# Agent Handoff')
+    print()
+    print('## Query')
+    print(query or '(recent/high-signal fallback)')
+
+    print()
+    print('## Likely sessions')
+    for session in sessions:
+        label = session.get('title') or session.get('path') or session.get('id')
+        bits = [f"score={session.get('score')}", f"source={session.get('source')}", f"id={session.get('id')}"]
+        if session.get('created_at'):
+            bits.append(f"created={session.get('created_at')}")
+        print(f"- {label} ({'; '.join(bits)})")
+
+    section('Files', files)
+    section('Commands already run', commands)
+    section('Errors / failures', errors)
+    section('Decisions / next steps', next_steps)
+    section('Other high-signal context', highlights)
+
+    print()
+    print('## Suggested next action')
+    print(sanitize_handoff_text(suggested))
+
+
 def cmd_list(limit=20, sources=None, json_out=False, current_session_only=False,
              exclude_current_session=False, include_excluded=False, exclude_sessions=None):
     """List sessions metadata."""
@@ -1601,6 +2139,12 @@ def main():
     pl.add_argument('--include-excluded-sessions', action='store_true', help='include sessions from the workspace exclusion block')
     pl.add_argument('--exclude-session', action='append', help='exclude a specific chat session id (repeatable)')
 
+    phandoff = sub.add_parser('handoff', help='emit compact agent handoff context')
+    phandoff.add_argument('query', nargs='*', help='optional handoff query; defaults to recent/high-signal sessions')
+    phandoff.add_argument('-n', '--limit', type=int, default=5, help='max candidate sessions')
+    phandoff.add_argument('-s', '--source', type=str, help='comma-separated sources to filter')
+    phandoff.add_argument('--json', action='store_true', dest='json_out', help='output JSON')
+
     pshow = sub.add_parser('show', help='show session content')
     pshow.add_argument('id', help='session id')
     pshow.add_argument('--json', action='store_true', dest='json_out', help='output JSON')
@@ -1652,6 +2196,16 @@ def main():
             exclude_current_session=args.exclude_current_session,
             include_excluded=args.include_excluded_sessions,
             exclude_sessions=args.exclude_session,
+        )
+
+    elif args.cmd == 'handoff':
+        q = ' '.join(args.query).strip() if args.query else None
+        sources = args.source.split(',') if args.source else None
+        cmd_handoff(
+            query=q,
+            limit=args.limit,
+            sources=sources,
+            json_out=args.json_out,
         )
 
     elif args.cmd == 'show':

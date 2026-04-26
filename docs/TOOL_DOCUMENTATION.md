@@ -141,6 +141,8 @@ The CLI currently exposes:
 
 ```bash
 python csr.py scan
+python csr.py handoff "keyword"
+python csr.py handoff
 python csr.py search "keyword" --json
 python csr.py list --json --limit 5
 python csr.py show <session_id> --json
@@ -152,12 +154,26 @@ python csr.py health
 whether the default VS Code Stable workspace storage exists, and the current
 workspace.
 
+The Copilot chat formatter now performs a first pass of deterministic fact
+extraction. For parsed `chatSessions/*.jsonl` sessions it surfaces compact
+sections for files, edited files, commands, errors, decisions/next steps,
+high-signal lines, and terminal/tool events before recent-turn previews. This is
+the extraction layer used by `handoff`.
+
+`handoff` emits a capped markdown packet for direct agent prompt injection. With
+a query it searches matching sessions; without a query it falls back to recent
+high-signal indexed sessions.
+
+For handoff ranking, chat/session sources are preferred over markdown docs when
+both match. Docs explain what exists; chat/session sources better capture what
+happened.
+
 ### Highest Priority
 
 - **VS Code storage discovery**: support Stable (`Code`), Insiders (`Code - Insiders`), and user-supplied roots. Discovery should use environment-derived paths such as `APPDATA`, `TERM_PROGRAM_VERSION`, `VSCODE_*`, and terminal/tool metadata captured in Copilot sessions.
 - **Session discovery**: infer active workspace/session data from `chat.ChatSessionStore.index`, `chatSessions/*.jsonl`, terminal command metadata, and conversation titles rather than hard-coded `WORKSPACE_CURRENT_CHAT_SESSION_ID` values.
 - **Environment-aware recall**: index Copilot terminal/tool records, including command, cwd, language, exit code, command URI, terminal output, and useful environment variables. This helps future scans locate the right database/session without guessing.
-- **Deterministic handoff compression**: implement `csr handoff <query>` as a local extractor plus heuristic compressor. It should emit compact agent-ready markdown from matched sessions, files, commands, errors, decisions, and next steps. See `docs/HANDOFF_DESIGN.md`.
+- **Deterministic handoff compression**: continue refining `csr handoff <query>` as a local extractor plus heuristic compressor. It emits compact agent-ready markdown from matched sessions, files, commands, errors, decisions, and next steps. See `docs/HANDOFF_DESIGN.md`.
 - **Documentation parity**: keep README, this file, `AGENTS-TEMPLATE.md`, and `csr --help` aligned with actual behavior.
 
 ## Roadmap Commands (In Development)
@@ -165,18 +181,21 @@ workspace.
 These commands and flags are documented in templates or implied by the current
 data model, but are not fully implemented yet:
 
-### handoff (Planned)
+### handoff
 Produce a compact markdown packet for a new agent from persisted local state.
 
 ```bash
 python csr.py handoff "packet 007"
-python csr.py handoff "packet 007" --current-session
+python csr.py handoff
 python csr.py handoff "packet 007" --json
+python csr.py handoff "packet 007" --limit 20
+python csr.py handoff "packet 007" --source vscode-copilot
 ```
 
-The handoff command should score and extract high-signal rows: headings, file
-paths, code blocks, commands, errors, decisions, TODO/next-step sentences,
-terminal tool records, edited files, and environment/storage clues.
+The handoff command scores and extracts high-signal rows: headings, file paths,
+commands, errors, decisions, TODO/next-step sentences, terminal tool records,
+edited files, and related context. If no query is provided, it uses recent
+high-signal indexed sessions.
 
 ### files (Planned)
 List recently touched files with metadata.
@@ -226,6 +245,7 @@ python csr.py checkpoints --days 3
 ### Storage
 - **Local-first**: All data stored locally in your workspace
 - **Privacy-focused**: No remote sync or cloud uploads by default
+- **Raw discovery quarantine**: unsanitized local captures should go under ignored `unsanitized/`; commit only sanitized derivatives
 - **Indexing**: SQLite or similar lightweight database for fast queries
 - **Session stores**: Integrates with VS Code's local session storage
 
@@ -293,6 +313,7 @@ Run periodically (e.g., hourly or daily) to keep the index fresh with recent wor
 - Run `scan` regularly (daily or after focused work sessions) to keep the index current
 - Use `--limit` flags to reduce output when searching for quick context
 - Leverage `--json` output for programmatic processing
+- Keep raw captures in `unsanitized/` and sanitize before moving useful notes into tracked docs
 
 ### Searching
 - Use specific keywords to narrow results (e.g., function names, file paths)

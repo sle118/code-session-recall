@@ -1,5 +1,17 @@
 # Agent Notes
 
+## Privacy Rule
+
+Raw discovery outputs, chat extracts, environment dumps, database probes, and
+other potentially identifying material must go in `unsanitized/`. That folder is
+local-only and ignored by Git. Do not commit content from there directly.
+
+When a discovery result is useful for the project, create a sanitized derivative
+in `docs/` or another appropriate tracked location. Replace personal details,
+machine names, usernames, absolute profile paths, session ids, workspace hashes,
+tokens, domain-specific client terms, and expected-output templates with
+placeholders before staging.
+
 This repository contains `code-session-recall` (`csr`), a small local Python CLI
 for recovering and searching VS Code/GitHub Copilot coding sessions. The main
 entry point is `csr.py`.
@@ -35,6 +47,8 @@ theme is environment-aware discovery:
 ```powershell
 python csr.py --help
 python csr.py scan
+python csr.py handoff "keyword"
+python csr.py handoff
 python csr.py list --json -n 5
 python csr.py search "keyword" --json
 python csr.py health
@@ -55,3 +69,6 @@ python -m py_compile csr.py
   chat extracts, or validation heuristics. Exploratory searches should take
   caller-provided terms rather than baking sensitive terms into the repo.
 - Keep docs and CLI behavior aligned when adding commands or flags.
+- When utility behavior changes, update `AGENTS-TEMPLATE.md` too. That file is
+  meant to be merged into `AGENTS.md` files in repositories where `csr` is used,
+  so it must reflect the current recommended agent workflow.

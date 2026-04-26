@@ -11,6 +11,8 @@ This file contains the raw instruction block for manual reference. Copy the bloc
 **Run `csr` FIRST on every prompt before doing anything else.** It costs very little and prevents expensive blind searches.
 
 ```bash
+csr handoff '<term or prompt summary>'  # compact context packet; run this first
+csr handoff                            # fallback to recent/high-signal sessions
 csr files --json --limit 10          # recently touched files
 csr files --days 7 --json            # files touched in last 7 days
 csr list --json --limit 5           # recent sessions

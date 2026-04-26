@@ -50,6 +50,9 @@ Key record types and what they provide
 Usage (examples)
 
 python csr.py scan
+python csr.py handoff "keyword"
+python csr.py handoff
+python csr.py handoff "keyword" --json
 python csr.py search "keyword"
 python csr.py show <id> --json
 python csr.py export --out sessions.ndjson
@@ -69,16 +72,17 @@ session ids.
 	- `show` - display a single session
 	- `export` - export sessions or slices
 	- `health` - basic DB/workspaceStorage/workspace check
+	- formatter fact extraction - Copilot chat formatting now extracts compact `files`, `commands`, `errors`, `nextSteps`, `editedFiles`, and `toolEvents` facts before recent-turn previews
+	- `handoff` - produce compact agent-ready markdown from matched or recent sessions
 
 - Highest priority
 	- VS Code storage discovery - support Stable (`Code`), Insiders (`Code - Insiders`), and user-supplied roots; prefer environment-derived paths such as `APPDATA`, `TERM_PROGRAM_VERSION`, `VSCODE_*`, and terminal/tool metadata captured in Copilot sessions.
 	- Session discovery - infer the active workspace/session from `chat.ChatSessionStore.index`, `chatSessions/*.jsonl`, terminal command metadata, and conversation titles instead of hard-coded `WORKSPACE_CURRENT_CHAT_SESSION_ID`.
 	- Environment-aware recall - index Copilot terminal/tool records, including command, cwd, language, exit code, command URI, and useful environment variables, so future scans can locate the right database/session without guessing.
-	- Deterministic handoff compression - add `csr handoff <query>` as an extractor plus local heuristic compressor that emits compact agent-ready markdown from persisted Copilot/VS Code state; see `docs/HANDOFF_DESIGN.md`.
+	- Improve deterministic handoff compression - continue refining `csr handoff <query>` scoring, workspace affinity, and typed fact ranking; see `docs/HANDOFF_DESIGN.md`.
 	- Docs parity - keep README, `docs/TOOL_DOCUMENTATION.md`, `AGENTS-TEMPLATE.md`, and `csr --help` aligned with actual CLI behavior.
 
 - Roadmap / desirable commands and flags
-	- `handoff` - produce a low-token agent handoff from matched sessions, files, commands, errors, decisions, and next steps: `csr handoff "packet 007"`
 	- `files` - list recently touched files with metadata (useful for quick context): `csr files --json --limit 10`
 	- `checkpoints` - list or search named checkpoints across sessions
 	- enhanced `health` - 8-dimension health check report for the local datastore, VS Code storage discovery, current workspace/session, parser coverage, and index freshness
@@ -87,6 +91,7 @@ session ids.
 
 Notes and conventions
 - We intentionally keep sample data and temporary investigation outputs out of version control by default; see `.gitignore`.
+- Raw discovery outputs belong in ignored `unsanitized/`; only sanitized derivatives should be committed to `docs/` or code.
 - Sessions are meant to be local by default; export if you need to share or archive them.
 
 Contributing and extensions

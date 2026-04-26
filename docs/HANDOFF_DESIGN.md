@@ -27,6 +27,7 @@ pasted into Copilot Chat or another coding agent.
 
 ```powershell
 python csr.py handoff "packet 007"
+python csr.py handoff
 ```
 
 The command should:
@@ -36,6 +37,11 @@ The command should:
 3. Extract high-signal rows and lines.
 4. Compress them with deterministic heuristics.
 5. Produce a compact handoff markdown packet.
+
+Current implementation status: `csr handoff` exists. It searches indexed
+sessions when given a query and falls back to recent/high-signal sessions when
+called without one. It emits capped markdown or JSON and avoids raw transcript
+dumps. Scoring is intentionally simple and deterministic.
 
 Example shape:
 
@@ -71,7 +77,9 @@ Ask the new agent to inspect packet files and continue from the recovered state.
 - It can scan VS Code/Copilot chat state.
 - It can reconstruct `chatSessions/*.jsonl` state from incremental JSONL rows.
 - It can parse `chat.ChatSessionStore.index` from `state.vscdb`.
-- It can format chat transcripts into readable content.
+- It can format chat sessions into compact fact sections plus recent-turn previews.
+- It can extract first-pass typed facts: files, edited files, commands, errors,
+  next steps, high-signal lines, and terminal/tool events.
 - It has SQLite FTS search over session content.
 - It has command surfaces for `scan`, `search`, `list`, `show`, `export`, and
   `health`.
@@ -108,6 +116,12 @@ Useful row types:
 These rows can live in SQLite as separate tables later, but the first pass can
 derive them at scan or handoff time from the existing session content and parsed
 JSONL structures.
+
+Current implementation status: `parse_chat_session_state()` derives several of
+these rows in memory, `format_chat_session_transcript()` displays compact
+sections before recent-turn previews, and `csr handoff` reuses those indexed
+facts/text to emit a prompt-sized handoff. The rows are not yet stored in
+dedicated SQLite tables.
 
 ## Compression Heuristics
 
@@ -156,11 +170,10 @@ Potential flags:
 
 ```powershell
 python csr.py handoff "packet 007" --limit 20
-python csr.py handoff "packet 007" --session <chat-session-id>
-python csr.py handoff "packet 007" --current-session
 python csr.py handoff "packet 007" --json
-python csr.py handoff "packet 007" --include-terminal-output
 ```
+
+Current first-pass flags are `--limit/-n`, `--source/-s`, and `--json`.
 
 ## Formatter Expansion
 
@@ -170,11 +183,11 @@ but they should feed structured rows.
 
 Near-term formatter targets:
 
-- Copilot `chatSessions/*.jsonl` request/response state.
-- `toolInvocationSerialized` records.
-- Terminal command metadata and output.
-- `editedFileEvents`.
-- Inline file references in VS Code URI objects.
+- Copilot `chatSessions/*.jsonl` request/response state. First pass exists.
+- `toolInvocationSerialized` records. First pass exists.
+- Terminal command metadata and output. First pass exists.
+- `editedFileEvents`. First pass exists.
+- Inline file references in VS Code URI objects. First pass exists.
 - `chat.ChatSessionStore.index` timing/title/session metadata.
 - Environment dump command outputs, especially `Name`/`Value` or `Key`/`Value`
   pairs.
@@ -196,3 +209,39 @@ Good output should answer:
 - What is the next useful action?
 
 This keeps token cost low while preserving enough context for an agent to act.
+
+## Manual Validation
+
+Run these after changing handoff or formatter logic:
+
+```powershell
+python -m py_compile csr.py
+python csr.py scan
+python csr.py handoff "packet 007"
+python csr.py handoff "memory"
+python csr.py handoff
+python csr.py handoff "unlikely-no-match-query"
+```
+
+## Real Task Evaluation
+
+The practical metric is `time-to-orientation`, not generic answer quality.
+
+For a real resumed task, run `csr handoff` before asking an agent to work:
+
+```powershell
+python csr.py handoff "<task summary>"
+```
+
+Then compare the agent's first response against these questions:
+
+- Did it identify the right files without broad search?
+- Did it avoid repeating already-failed commands?
+- Did it preserve prior decisions?
+- Did its first plan look grounded in the previous work?
+- Did it reduce the first 1-3 turns of rediscovery?
+
+If yes, handoff is doing its job.
+
+Ranking note: prefer chat/session sources over docs when both match. Docs explain
+what exists; chat/session sources better capture what happened.
