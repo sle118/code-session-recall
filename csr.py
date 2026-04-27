@@ -2391,32 +2391,46 @@ Use this prompt when asking an agent to install or activate CSR in a workspace:
 ```text
 Install and activate code-session-recall for this workspace.
 
-First try the installed CLI:
+Do these steps in order.
+
+1. First try the installed CLI:
   csr --help
 
-If `csr` is unavailable, install it:
+2. If `csr` is unavailable, install it:
   python -m pip install code-session-recall
 
-If package install is unavailable but this repository is present in the
+3. If package install is unavailable but this repository is present in the
 workspace, read and execute:
   code-session-recall/docs/INSTALL.md
 
-Then update the workspace's top-level AGENTS.md or equivalent instructions with
-a prominent Session Recall section near the top. Do not bury CSR in a secondary
-tools list.
+4. Update the workspace's top-level AGENTS.md or equivalent instructions with a
+prominent Progressive Session Recall section near the top. Do not bury CSR in a
+secondary tools list.
+
+5. After updating instructions, immediately run:
+  csr handoff
+
+Use the handoff output to continue the current task. Do not stop after merely
+installing CSR or editing AGENTS.md.
 ```
 
 Add this near the top of AGENTS.md:
 
 ```markdown
-## Session Recall - Run First
+## Progressive Session Recall - RUN FIRST
 
-Before broad searches or fresh reasoning, run `csr handoff "<prompt summary>"`.
-If unsure what to search for, run `csr handoff`. Use the result as orientation
-context, then continue with targeted inspection.
+Your first tool action on every user prompt must be:
+
+`csr handoff "<prompt summary>"`
+
+If the prompt is unclear, run `csr handoff`. Use the returned packet as
+orientation before reading files, grepping, listing directories, or planning
+from memory.
 ```
 
-After updating instructions, verify:
+Then merge the full command block from `AGENTS-TEMPLATE.md`.
+
+After updating instructions, run these now:
 
 ```bash
 csr handoff

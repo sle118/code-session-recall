@@ -16,17 +16,23 @@ Assumed layout:
 
 ## Progressive Session Recall - RUN FIRST ON EVERY PROMPT
 
-Run `code-session-recall` before broad filesystem searches or fresh reasoning.
-It costs little and reduces blind rediscovery.
+Your first tool action on every user prompt must be session recall. Run CSR
+before reading files, grepping, listing directories, or planning from memory. It
+costs little and prevents blind rediscovery.
 
-Prefer the installed CLI when available:
+Start with one of these, using the installed CLI when available:
 
 ```bash
-csr handoff '<term or prompt summary>'  # compact context packet; run this first
-csr handoff                             # fallback to recent/high-signal sessions
-csr ask '<question>' --json             # compatibility alias for handoff
+csr handoff '<prompt summary>'          # FIRST command on each prompt
+csr handoff                             # use when the prompt is unclear
+```
+
+Then use targeted CSR commands before broad filesystem tools:
+
+```bash
 csr list --json --limit 5               # recent sessions
-csr search '<term>' --json              # full-text search
+csr search '<term>' --json              # full-text session search
+csr ask '<question>' --json             # alias for handoff
 csr show <id> --json                    # drill into one session
 csr health                              # local health check
 ```
@@ -34,13 +40,13 @@ csr health                              # local health check
 If the downstream workspace has a verified wrapper, prefer the short command:
 
 ```bash
-./csr handoff '<term or prompt summary>'  # compact context packet; run this first
-./csr handoff                             # fallback to recent/high-signal sessions
-./csr ask '<question>' --json             # compatibility alias for handoff
-./csr list --json --limit 5               # recent sessions
-./csr search '<term>' --json              # full-text search
-./csr show <id> --json                    # drill into one session
-./csr health                              # local health check
+./csr handoff '<prompt summary>'        # FIRST command on each prompt
+./csr handoff                           # use when the prompt is unclear
+./csr list --json --limit 5
+./csr search '<term>' --json
+./csr ask '<question>' --json
+./csr show <id> --json
+./csr health
 ```
 
 On Windows PowerShell, the verified wrapper may be `.\csr.ps1` instead of
@@ -49,13 +55,13 @@ On Windows PowerShell, the verified wrapper may be `.\csr.ps1` instead of
 If no wrapper is available, use the explicit Python command:
 
 ```bash
-python code-session-recall/csr.py handoff '<term or prompt summary>'  # compact context packet; run this first
-python code-session-recall/csr.py handoff                             # fallback to recent/high-signal sessions
-python code-session-recall/csr.py ask '<question>' --json             # compatibility alias for handoff
-python code-session-recall/csr.py list --json --limit 5               # recent sessions
-python code-session-recall/csr.py search '<term>' --json              # full-text search
-python code-session-recall/csr.py show <id> --json                    # drill into one session
-python code-session-recall/csr.py health                              # local health check
+python code-session-recall/csr.py handoff '<prompt summary>'  # FIRST command on each prompt
+python code-session-recall/csr.py handoff                     # use when the prompt is unclear
+python code-session-recall/csr.py list --json --limit 5
+python code-session-recall/csr.py search '<term>' --json
+python code-session-recall/csr.py ask '<question>' --json
+python code-session-recall/csr.py show <id> --json
+python code-session-recall/csr.py health
 ```
 
 `handoff`, `ask`, and `list` bootstrap an empty local index by running one
@@ -67,6 +73,6 @@ alias for the deterministic handoff packet.
 CSR filters terminal/tool invocations of `csr` itself so command output from
 recall operations does not feed back into future recall packets.
 
-Only use filesystem tools (`rg`, glob, find) if `handoff` and targeted `csr`
-queries return nothing useful. If `csr` errors, continue silently; it is a
-convenience, not a blocker.
+Only use filesystem tools (`rg`, glob, find) after `handoff` and targeted `csr`
+queries return nothing useful. If `csr` errors, continue silently and proceed;
+it is a convenience, not a blocker.

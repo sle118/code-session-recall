@@ -16,6 +16,24 @@ This repository contains `code-session-recall` (`csr`), a small local Python CLI
 for recovering and searching VS Code/GitHub Copilot coding sessions. The main
 entry point is `csr.py`.
 
+## Progressive Session Recall - RUN FIRST
+
+Before broad searches or fresh reasoning in this repository, run:
+
+```powershell
+python csr.py handoff "<prompt summary>"
+```
+
+If the prompt is unclear, run:
+
+```powershell
+python csr.py handoff
+```
+
+Use the returned packet as orientation before reading files, grepping, listing
+directories, or planning from memory. If CSR errors, continue silently; it is a
+convenience, not a blocker.
+
 ## Read First
 
 - `README.md` - project overview, current state, and roadmap.

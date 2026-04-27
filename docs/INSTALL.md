@@ -58,6 +58,9 @@ From the downstream workspace root:
 9. If the packaged CLI or wrapper works, write the merged instructions with
    short `csr` commands. If both fail, keep the explicit
    `python code-session-recall/csr.py` commands.
+10. After editing instructions, immediately run `csr handoff` or the selected
+    fallback command and use that output for the current task. Do not stop after
+    merely installing or editing `AGENTS.md`.
 
 Do not overwrite an unrelated existing `csr`, `csr.ps1`, or project command.
 Inspect first; if there is a conflict, skip wrapper installation and use the
@@ -127,16 +130,17 @@ snippet:
 csr install-instructions
 ```
 
-Place a short pointer near the top of the downstream `AGENTS.md` or equivalent
-instructions file, before long tool lists or project notes. This keeps CSR from
-being buried during arbitrary merges:
+Place this short pointer near the top of the downstream `AGENTS.md` or
+equivalent instructions file, before long tool lists or project notes. This
+keeps CSR from being buried during arbitrary merges:
 
 ```markdown
-## Session Recall - Run First
+## Progressive Session Recall - RUN FIRST
 
-Before broad searches or fresh reasoning, run `csr handoff "<prompt summary>"`.
-If unsure what to search for, run `csr handoff`. Use the result as orientation
-context, then continue with targeted inspection.
+Your first tool action on every user prompt must be `csr handoff "<prompt
+summary>"`. If the prompt is unclear, run `csr handoff`. Use the returned packet
+as orientation before reading files, grepping, listing directories, or planning
+from memory.
 ```
 
 Then merge the fuller recall block from `AGENTS-TEMPLATE.md`.
