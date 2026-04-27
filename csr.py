@@ -1796,7 +1796,7 @@ def cmd_scan(verbose=True):
 
 def cmd_search(q, limit=10, sources=None, json_out=False, exact=False, since=None, until=None,
                current_session_only=False, exclude_current_session=False, include_excluded=False,
-               exclude_sessions=None):
+               exclude_sessions=None, workspace_only=True):
     """Search sessions for query `q`.
     - limit: max results
     - sources: list of source strings to filter (or None)
@@ -1810,6 +1810,7 @@ def cmd_search(q, limit=10, sources=None, json_out=False, exact=False, since=Non
     # and including markdown/workspace artifacts by default clogs results.
     if sources is None:
         sources = ['vscode-copilot']
+    candidate_limit = max(limit * 8, 80)
 
     rows = []
     seen_session_ids = set()
@@ -1828,7 +1829,7 @@ def cmd_search(q, limit=10, sources=None, json_out=False, exact=False, since=Non
             sql += f" AND sessions.source IN ({placeholders})"
             params.extend(sources)
         sql += " ORDER BY sessions.created_at DESC LIMIT ?"
-        params.append(limit)
+        params.append(candidate_limit)
         rows = c.execute(sql, tuple(params)).fetchall()
         seen_session_ids.update(r[0] for r in rows)
     except Exception:
@@ -1849,20 +1850,20 @@ def cmd_search(q, limit=10, sources=None, json_out=False, exact=False, since=Non
             sql += f" AND sessions.source IN ({placeholders})"
             params.extend(sources)
         sql += " LIMIT ?"
-        params.append(limit)
+        params.append(candidate_limit)
         match_rows = c.execute(sql, tuple(params)).fetchall()
         for row in match_rows:
             if row[0] in seen_session_ids:
                 continue
             rows.append(row)
             seen_session_ids.add(row[0])
-            if len(rows) >= limit:
+            if len(rows) >= candidate_limit:
                 break
     except Exception:
         pass
 
     # Fallback to a case-insensitive LIKE search on the content column
-    if len(rows) < limit:
+    if len(rows) < candidate_limit:
         try:
             params = [qlike]
             sql = """
@@ -1876,14 +1877,14 @@ def cmd_search(q, limit=10, sources=None, json_out=False, exact=False, since=Non
                 sql += f" AND sessions.source IN ({placeholders})"
                 params.extend(sources)
             sql += " LIMIT ?"
-            params.append(limit)
+            params.append(candidate_limit)
             like_rows = c.execute(sql, tuple(params)).fetchall()
             for row in like_rows:
                 if row[0] in seen_session_ids:
                     continue
                 rows.append(row)
                 seen_session_ids.add(row[0])
-                if len(rows) >= limit:
+                if len(rows) >= candidate_limit:
                     break
         except Exception:
             pass
@@ -1900,6 +1901,7 @@ def cmd_search(q, limit=10, sources=None, json_out=False, exact=False, since=Non
         ):
             filtered_by_session.append(r)
     rows = filtered_by_session
+    rows = apply_workspace_filter(rows, cursor=c, workspace_only=workspace_only)
 
     # If the user requested time filtering, apply it to the candidate rows.
     if since or until:
@@ -1987,11 +1989,84 @@ def sanitize_handoff_text(value):
     return text
 
 
-def get_handoff_candidate_rows(query=None, limit=8, sources=None):
+def normalize_workspace_text(value):
+    text = stringify_text(value).replace('\\', '/').lower()
+    text = re.sub(r'/+', '/', text)
+    return text.rstrip('/')
+
+
+def current_workspace_markers():
+    markers = []
+    try:
+        cwd = Path(os.getcwd()).resolve()
+    except Exception:
+        cwd = Path(os.getcwd())
+
+    candidates = [str(cwd)]
+    if os.name == 'nt':
+        drive = cwd.drive.rstrip(':').lower()
+        rest = cwd.as_posix()[2:] if cwd.drive else cwd.as_posix()
+        if drive and rest:
+            candidates.append(f'/{drive}{rest}')
+            candidates.append(f'/mnt/{drive}{rest}')
+
+    for candidate in candidates:
+        marker = normalize_workspace_text(candidate)
+        if marker and marker not in markers:
+            markers.append(marker)
+    return markers
+
+
+def row_workspace_affinity(row, markers=None):
+    markers = markers or current_workspace_markers()
+    if not markers:
+        return 0
+    path = row[2] if len(row) > 2 else ''
+    content = row[6] if len(row) > 6 else ''
+    haystack = normalize_workspace_text(f'{path}\n{content}')
+    score = 0
+    for marker in markers:
+        if marker and marker in haystack:
+            score += 100
+    return score
+
+
+def workspace_affine_rows_exist(cursor, markers=None):
+    markers = markers or current_workspace_markers()
+    if not markers:
+        return False
+    try:
+        rows = cursor.execute(
+            "SELECT sessions.id, sessions.source, sessions.path, sessions.chat_session_id, "
+            "sessions.title, sessions.created_at, coalesce(sessions.display_content, messages.content) "
+            "FROM sessions JOIN messages ON sessions.id = messages.session_id "
+            "ORDER BY sessions.created_at DESC LIMIT 500"
+        ).fetchall()
+    except Exception:
+        return False
+    return any(row_workspace_affinity(row, markers=markers) > 0 for row in rows)
+
+
+def apply_workspace_filter(rows, cursor=None, workspace_only=True, markers=None):
+    if not workspace_only:
+        return rows
+    markers = markers or current_workspace_markers()
+    if not markers:
+        return rows
+    affine = [row for row in rows if row_workspace_affinity(row, markers=markers) > 0]
+    if affine:
+        return affine
+    if cursor is not None and workspace_affine_rows_exist(cursor, markers=markers):
+        return []
+    return rows
+
+
+def get_handoff_candidate_rows(query=None, limit=8, sources=None, workspace_only=True):
     conn = db()
     c = conn.cursor()
     rows = []
     seen = set()
+    candidate_limit = max(limit * 8, 40)
 
     def add_source_filter(sql, params):
         if sources:
@@ -2012,7 +2087,7 @@ def get_handoff_candidate_rows(query=None, limit=8, sources=None):
             """
             sql, params = add_source_filter(sql, params)
             sql += " ORDER BY sessions.created_at DESC LIMIT ?"
-            params.append(limit)
+            params.append(candidate_limit)
             for row in c.execute(sql, tuple(params)).fetchall():
                 if row[0] not in seen:
                     rows.append(row)
@@ -2030,7 +2105,7 @@ def get_handoff_candidate_rows(query=None, limit=8, sources=None):
             """
             sql, params = add_source_filter(sql, params)
             sql += " LIMIT ?"
-            params.append(limit * 2)
+            params.append(candidate_limit)
             for row in c.execute(sql, tuple(params)).fetchall():
                 if row[0] not in seen:
                     rows.append(row)
@@ -2048,7 +2123,7 @@ def get_handoff_candidate_rows(query=None, limit=8, sources=None):
             """
             sql, params = add_source_filter(sql, params)
             sql += " ORDER BY sessions.created_at DESC LIMIT ?"
-            params.append(limit * 2)
+            params.append(candidate_limit)
             for row in c.execute(sql, tuple(params)).fetchall():
                 if row[0] not in seen:
                     rows.append(row)
@@ -2066,12 +2141,12 @@ def get_handoff_candidate_rows(query=None, limit=8, sources=None):
             """
             sql, params = add_source_filter(sql, params)
             sql += " ORDER BY sessions.created_at DESC LIMIT ?"
-            params.append(limit * 2)
+            params.append(candidate_limit)
             rows = c.execute(sql, tuple(params)).fetchall()
         except Exception:
             rows = []
 
-    return rows
+    return apply_workspace_filter(rows, cursor=c, workspace_only=workspace_only)
 
 
 def score_handoff_row(row, query=None):
@@ -2090,6 +2165,7 @@ def score_handoff_row(row, query=None):
         score += 25
     elif source == 'markdown':
         score -= 8
+    score += row_workspace_affinity(row)
     score += min(len(facts.get('files') or []), 6) * 3
     score += min(len(facts.get('commands') or []), 6) * 4
     score += min(len(facts.get('errors') or []), 6) * 6
@@ -2131,16 +2207,16 @@ def select_scored_values(values, query=None, limit=8):
     return unique_preserve_order([item[2] for item in scored if item[0] > 0][:limit])
 
 
-def cmd_handoff(query=None, limit=5, sources=None, json_out=False):
-    rows = get_handoff_candidate_rows(query=query, limit=limit, sources=sources)
+def cmd_handoff(query=None, limit=5, sources=None, json_out=False, workspace_only=True):
+    rows = get_handoff_candidate_rows(query=query, limit=limit, sources=sources, workspace_only=workspace_only)
     if not rows:
         # Handoff is intended as the first command an agent runs. Bootstrap an
         # empty index once so a fresh clone still returns useful local context.
         cmd_scan(verbose=False)
-        rows = get_handoff_candidate_rows(query=query, limit=limit, sources=sources)
+        rows = get_handoff_candidate_rows(query=query, limit=limit, sources=sources, workspace_only=workspace_only)
     fallback_used = False
     if not rows and query:
-        rows = get_handoff_candidate_rows(query=None, limit=limit, sources=sources)
+        rows = get_handoff_candidate_rows(query=None, limit=limit, sources=sources, workspace_only=workspace_only)
         fallback_used = bool(rows)
     scored_rows = []
     for row in rows:
@@ -2213,6 +2289,7 @@ def cmd_handoff(query=None, limit=5, sources=None, json_out=False):
         'nextSteps': next_steps,
         'highlights': highlights,
         'suggestedNextAction': suggested,
+        'workspaceFiltered': bool(workspace_only),
     }
     if json_out:
         print(json.dumps(payload, ensure_ascii=False, indent=2))
@@ -2231,6 +2308,9 @@ def cmd_handoff(query=None, limit=5, sources=None, json_out=False):
     print()
     print('## Query')
     print(query or '(recent/high-signal fallback)')
+    if workspace_only:
+        print()
+        print(f"Workspace filter: {sanitize_handoff_text(os.getcwd())}")
     if fallback_used:
         print()
         print('No exact indexed match was found; showing recent/high-signal sessions instead.')
@@ -2257,23 +2337,28 @@ def cmd_handoff(query=None, limit=5, sources=None, json_out=False):
 
 def cmd_list(limit=20, sources=None, json_out=False, current_session_only=False,
              exclude_current_session=False, include_excluded=False, exclude_sessions=None,
-             bootstrap=True):
+             bootstrap=True, workspace_only=True):
     """List sessions metadata."""
     conn = db()
     c = conn.cursor()
+    candidate_limit = max(limit * 8, 80)
 
     def load_rows():
         params = []
-        sql = "SELECT id, source, path, chat_session_id, title, created_at FROM sessions"
+        sql = (
+            "SELECT sessions.id, sessions.source, sessions.path, sessions.chat_session_id, "
+            "sessions.title, sessions.created_at, coalesce(sessions.display_content, messages.content) "
+            "FROM sessions JOIN messages ON sessions.id = messages.session_id"
+        )
         if sources:
             placeholders = ','.join('?' for _ in sources)
-            sql += f" WHERE source IN ({placeholders})"
+            sql += f" WHERE sessions.source IN ({placeholders})"
             params.extend(sources)
         sql += " ORDER BY created_at DESC LIMIT ?"
-        params.append(limit)
+        params.append(candidate_limit)
 
         found = c.execute(sql, tuple(params)).fetchall()
-        return [
+        filtered = [
             r for r in found
             if should_include_chat_session(
                 r[3],
@@ -2283,6 +2368,7 @@ def cmd_list(limit=20, sources=None, json_out=False, current_session_only=False,
                 extra_excluded_ids=exclude_sessions,
             )
         ]
+        return apply_workspace_filter(filtered, cursor=c, workspace_only=workspace_only)[:limit]
 
     rows = load_rows()
     if not rows and bootstrap:
@@ -2460,6 +2546,7 @@ def main():
     ps.add_argument('--exclude-current-session', action='store_true', help='exclude the configured current workspace chat session')
     ps.add_argument('--include-excluded-sessions', action='store_true', help='include sessions from the workspace exclusion block')
     ps.add_argument('--exclude-session', action='append', help='exclude a specific chat session id (repeatable)')
+    ps.add_argument('--all-workspaces', action='store_true', help='disable the default current-workspace affinity filter')
 
     pl = sub.add_parser('list', help='list sessions')
     pl.add_argument('-n', '--limit', type=int, default=20)
@@ -2469,6 +2556,7 @@ def main():
     pl.add_argument('--exclude-current-session', action='store_true', help='exclude the configured current workspace chat session')
     pl.add_argument('--include-excluded-sessions', action='store_true', help='include sessions from the workspace exclusion block')
     pl.add_argument('--exclude-session', action='append', help='exclude a specific chat session id (repeatable)')
+    pl.add_argument('--all-workspaces', action='store_true', help='disable the default current-workspace affinity filter')
 
     for command_name, help_text in (
         ('handoff', 'emit compact agent handoff context'),
@@ -2479,6 +2567,7 @@ def main():
         phandoff.add_argument('-n', '--limit', type=int, default=5, help='max candidate sessions')
         phandoff.add_argument('-s', '--source', type=str, help='comma-separated sources to filter')
         phandoff.add_argument('--json', action='store_true', dest='json_out', help='output JSON')
+        phandoff.add_argument('--all-workspaces', action='store_true', help='disable the default current-workspace affinity filter')
 
     pshow = sub.add_parser('show', help='show session content')
     pshow.add_argument('id', help='session id')
@@ -2520,6 +2609,7 @@ def main():
             exclude_current_session=args.exclude_current_session,
             include_excluded=args.include_excluded_sessions,
             exclude_sessions=args.exclude_session,
+            workspace_only=not args.all_workspaces,
         )
 
     elif args.cmd == 'list':
@@ -2532,6 +2622,7 @@ def main():
             exclude_current_session=args.exclude_current_session,
             include_excluded=args.include_excluded_sessions,
             exclude_sessions=args.exclude_session,
+            workspace_only=not args.all_workspaces,
         )
 
     elif args.cmd in ('handoff', 'ask'):
@@ -2542,6 +2633,7 @@ def main():
             limit=args.limit,
             sources=sources,
             json_out=args.json_out,
+            workspace_only=not args.all_workspaces,
         )
 
     elif args.cmd == 'show':

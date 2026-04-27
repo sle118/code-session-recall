@@ -131,7 +131,10 @@ for todo and agent/subagent activity recall. The rows are not yet stored in
 dedicated SQLite tables. Terminal/tool calls that invoke `csr` itself are
 treated as self-referential plumbing and are excluded from command/output
 facts, preventing handoff/list/search output from feeding back into future
-handoffs.
+handoffs. Query commands also apply a first-pass current-workspace affinity
+filter by default, using path evidence from indexed rows to avoid conflating
+sessions from other repositories/workspaces. Use `--all-workspaces` to opt out
+when global recall is intentional.
 
 ## Compression Heuristics
 

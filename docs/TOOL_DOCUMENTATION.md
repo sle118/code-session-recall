@@ -196,6 +196,11 @@ state, and agent/subagent session summaries without dumping raw persisted JSON.
 a query it searches matching sessions; without a query it falls back to recent
 high-signal indexed sessions.
 
+By default, `handoff`, `search`, and `list` apply current-workspace affinity:
+rows whose path or formatted content mention the current working directory are
+preferred, and unrelated workspace sessions are hidden when current-workspace
+records exist. Use `--all-workspaces` for intentional cross-workspace recall.
+
 If the index is empty, `handoff`, `ask`, and `list` perform one silent local
 scan and retry. This supports the intended "run recall first" workflow in fresh
 agent sessions. If a `handoff`/`ask` query has no direct matches, it falls back
@@ -208,7 +213,7 @@ happened.
 ### Highest Priority
 
 - **VS Code storage discovery**: support Stable (`Code`), Insiders (`Code - Insiders`), and user-supplied roots. Discovery should use environment-derived paths such as `APPDATA`, `TERM_PROGRAM_VERSION`, `VSCODE_*`, and terminal/tool metadata captured in Copilot sessions.
-- **Session discovery**: infer active workspace/session data from `chat.ChatSessionStore.index`, `chatSessions/*.jsonl`, terminal command metadata, and conversation titles rather than hard-coded `WORKSPACE_CURRENT_CHAT_SESSION_ID` values.
+- **Session discovery**: continue improving active workspace/session data from `chat.ChatSessionStore.index`, `chatSessions/*.jsonl`, terminal command metadata, and conversation titles rather than hard-coded `WORKSPACE_CURRENT_CHAT_SESSION_ID` values. A first-pass current-workspace affinity filter now exists for query commands.
 - **Environment-aware recall**: index Copilot terminal/tool records, including command, cwd, language, exit code, command URI, terminal output, and useful environment variables. This helps future scans locate the right database/session without guessing.
 - **Deterministic handoff compression**: continue refining `csr handoff <query>` as a local extractor plus heuristic compressor. It emits compact agent-ready markdown from matched sessions, files, commands, errors, decisions, and next steps. See `docs/HANDOFF_DESIGN.md`.
 - **Documentation parity**: keep README, this file, `AGENTS-TEMPLATE.md`, and `csr --help` aligned with actual behavior.

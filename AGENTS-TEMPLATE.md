@@ -37,6 +37,10 @@ csr show <id> --json                    # drill into one session
 csr health                              # local health check
 ```
 
+By default, `handoff`, `search`, and `list` prefer records with evidence for the
+current workspace path. Use `--all-workspaces` only when intentionally searching
+across other repositories/workspaces on the same machine.
+
 If the downstream workspace has a verified wrapper, prefer the short command:
 
 ```bash
