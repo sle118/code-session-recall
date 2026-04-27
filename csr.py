@@ -3,6 +3,8 @@ import os, sys, sqlite3, json, hashlib, zlib, argparse, gzip, re
 from pathlib import Path
 from datetime import datetime, timezone
 
+__version__ = "0.1.2"
+
 try:
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')
 except Exception:
@@ -2426,17 +2428,11 @@ def cmd_list(limit=20, sources=None, json_out=False, current_session_only=False,
         return apply_workspace_filter(filtered, cursor=c, workspace_only=workspace_only)[:limit]
 
     rows = load_rows()
-    if not rows and sources is None:
-        effective_sources = None
-        rows = load_rows()
     if not rows and bootstrap:
         # Agents commonly run `list` before `handoff`. Make that first contact
         # useful in a fresh workspace without requiring a separate scan step.
         cmd_scan(verbose=False)
         rows = load_rows()
-        if not rows and sources is None:
-            effective_sources = None
-            rows = load_rows()
     if json_out:
         out = [
             {
@@ -2597,6 +2593,7 @@ csr list --json --limit 5
 # ----------------------------
 def main():
     parser = argparse.ArgumentParser(prog='csr', description='Code Session Recall - lightweight session search')
+    parser.add_argument('--version', action='version', version=f'%(prog)s {__version__}')
     sub = parser.add_subparsers(dest='cmd')
 
     sub.add_parser('scan', help='scan workspace and index sessions')

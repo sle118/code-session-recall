@@ -38,6 +38,7 @@ Once published to PyPI:
 
 ```bash
 python -m pip install code-session-recall
+csr --version
 csr handoff
 csr install-instructions
 ```
@@ -47,6 +48,7 @@ For local development or pre-release testing from a clone:
 ```bash
 python -m pip install -e .
 csr --help
+csr --version
 csr install-instructions
 ```
 
@@ -55,6 +57,7 @@ The repository-local entry point remains available:
 ```bash
 python csr.py handoff
 python csr.py install-instructions
+python csr.py --version
 ```
 
 `csr install-instructions` prints the exact bootstrap prompt and AGENTS.md
