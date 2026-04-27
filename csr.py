@@ -3,7 +3,7 @@ import os, sys, sqlite3, json, hashlib, zlib, argparse, gzip, re
 from pathlib import Path
 from datetime import datetime, timezone
 
-__version__ = "0.1.3"
+__version__ = "0.1.4"
 
 try:
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')
@@ -500,6 +500,33 @@ def is_csr_self_line(value):
         return False
     if is_csr_self_command(text):
         return True
+    normalized = normalize_fact_text(text)
+    normalized_l = normalized.lower()
+    if re.search(r'\bcsr\s+(?:handoff|ask|list|search|show|scan|health)\b', normalized_l):
+        return True
+    if re.search(r"can't open file ['\"][^'\"]*csr\.py['\"]", normalized_l):
+        return True
+    if re.match(r'(?i)^(?:errors|next|highlights|decisions / next steps):(?:\s+|$)', normalized):
+        return True
+    if normalized in {
+        'Query',
+        'Likely sessions',
+        'Files',
+        'Commands already run',
+        'Errors / failures',
+        'Decisions / next steps',
+        'Other high-signal context',
+        'Suggested next action',
+        '## Query',
+        '## Likely sessions',
+        '## Files',
+        '## Commands already run',
+        '## Errors / failures',
+        '## Decisions / next steps',
+        '## Other high-signal context',
+        '## Suggested next action',
+    }:
+        return True
     # Common headings emitted by csr should not become high-signal facts when
     # they appear in terminal output from a csr invocation.
     return text in {
@@ -522,11 +549,82 @@ def is_terminal_tool_name(value):
 
 
 def add_unique_limited(target, value, limit=20):
-    value = stringify_text(value).strip()
+    value = normalize_fact_text(value)
     if not value or value in target:
         return
     if len(target) < limit:
         target.append(value)
+
+
+def normalize_fact_text(value):
+    text = stringify_text(value).strip()
+    if not text:
+        return ''
+    text = text.rstrip(',')
+    if len(text) >= 2 and text[0] == text[-1] and text[0] in ('"', "'"):
+        try:
+            text = json.loads(text)
+        except Exception:
+            text = text[1:-1]
+    text = stringify_text(text).strip()
+    text = re.sub(r'^(?:[-*]\s+)+', '', text).strip()
+    return text
+
+
+def is_raw_structured_fact_line(value):
+    text = normalize_fact_text(value)
+    if not text:
+        return True
+    if text.startswith('{') or text.startswith('['):
+        return True
+    if re.match(r'^[}\]],?$', text):
+        return True
+    if re.match(r'^"[A-Za-z0-9_ -]+"\s*:', text):
+        return True
+    return False
+
+
+def clean_path_candidate(value):
+    text = stringify_text(value).strip().rstrip('.,;:)')
+    if text.endswith('#'):
+        return ''
+    if not text:
+        return ''
+    normalized = text.replace('\\', '/').rstrip('/')
+    try:
+        cwd = Path(os.getcwd()).resolve().as_posix().rstrip('/')
+    except Exception:
+        cwd = os.getcwd().replace('\\', '/').rstrip('/')
+    if normalized == cwd:
+        return ''
+    if re.match(r'^/workspaces/[^/]+$', normalized):
+        return ''
+    if re.search(r'[#>$]$', normalized):
+        return ''
+    return text
+
+
+def is_shell_prompt_path_line(value):
+    text = normalize_fact_text(value)
+    if re.match(r'^(?:[A-Z]:\\|/)[^\s]+[#>$]$', text):
+        return True
+    return bool(re.match(r'^/workspaces/[^/]+$', text.replace('\\', '/').rstrip('/')))
+
+
+def is_false_positive_error_line(value):
+    text = normalize_fact_text(value)
+    lower = text.lower()
+    if lower == 'tool failed kind=tool.execution_complete':
+        return True
+    if 'missing step' in lower:
+        return True
+    if 'missing destination file operand' in lower:
+        return True
+    if 'auto-install missing python requirements' in lower:
+        return True
+    if lower.startswith('command -v ') and 'not found' in lower:
+        return True
+    return False
 
 
 def uri_to_path(value):
@@ -560,9 +658,12 @@ def collect_uri_paths(obj, out=None, depth=0):
 
 def extract_paths_from_text(text, limit=30):
     out = []
-    for match in PATH_RE.findall(stringify_text(text)):
-        cleaned = match.rstrip('.,;:)')
-        add_unique_limited(out, cleaned, limit=limit)
+    for line in stringify_text(text).splitlines():
+        if is_csr_self_line(line) or is_raw_structured_fact_line(line):
+            continue
+        for match in PATH_RE.findall(line):
+            cleaned = clean_path_candidate(match)
+            add_unique_limited(out, cleaned, limit=limit)
     return out
 
 
@@ -573,7 +674,15 @@ def high_signal_lines(text, query=None, limit=12):
         original = line.strip()
         if not original:
             continue
+        if original == '----- JSON -----':
+            break
         if is_csr_self_line(original):
+            continue
+        if is_shell_prompt_path_line(original):
+            continue
+        if is_raw_structured_fact_line(original):
+            continue
+        if is_false_positive_error_line(original):
             continue
         line_l = original.lower()
         score = 0
@@ -601,6 +710,8 @@ def high_signal_lines(text, query=None, limit=12):
 
 
 def classify_fact_line(line):
+    if is_false_positive_error_line(line):
+        return 'highlights'
     if ERROR_RE.search(line):
         return 'errors'
     if COMMAND_LINE_RE.search(line):
