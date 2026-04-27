@@ -64,6 +64,9 @@ workspace. If a query has no direct matches, `handoff`/`ask` fall back to recent
 high-signal sessions. `ask` does not call an LLM; it is just a natural-language
 alias for the deterministic handoff packet.
 
+CSR filters terminal/tool invocations of `csr` itself so command output from
+recall operations does not feed back into future recall packets.
+
 Only use filesystem tools (`rg`, glob, find) if `handoff` and targeted `csr`
 queries return nothing useful. If `csr` errors, continue silently; it is a
 convenience, not a blocker.

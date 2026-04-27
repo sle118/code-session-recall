@@ -396,6 +396,58 @@ COMMAND_LINE_RE = re.compile(r'(?i)^\s*(?:[-*]\s*)?`?(?:(?:python|py|git|rg|grep
 ERROR_RE = re.compile(r'(?i)\b(?:error|exception|traceback|failed|denied|missing|timeout|out of memory|heap|not found|exit code [1-9])\b')
 NEXT_RE = re.compile(r'(?i)\b(?:todo|next|follow-?up|roadmap|planned|blocked|issue|fixme|later)\b')
 DECISION_RE = re.compile(r'(?i)\b(?:decision|decided|choose|chosen|approach|rationale|tradeoff|trade-off|we will|should)\b')
+CSR_DIRECT_COMMAND_RE = re.compile(
+    r'''(?ix)
+    (?:^|[;&|]\s*)(?:&\s*)?
+    (?:
+        "[^"]*[\\/]csr(?:\.exe)?"
+        | '[^']*[\\/]csr(?:\.exe)?'
+        | (?:[^\s;&|]+[\\/])?csr(?:\.exe)?
+    )
+    (?:\s|$)
+    '''
+)
+CSR_PYTHON_COMMAND_RE = re.compile(
+    r'''(?ix)
+    (?:^|[;&|]\s*)(?:python(?:3)?|py)(?:\.exe)?
+    (?:
+        (?:\s+\S+)*\s+
+        (?:
+            "[^"]*[\\/]csr\.py"
+            | '[^']*[\\/]csr\.py'
+            | (?:[^\s;&|]+[\\/])?csr\.py
+            | (?:-m\s+)(?:csr|code_session_recall)
+        )
+    )
+    (?:\s|$)
+    '''
+)
+
+
+def is_csr_self_command(value):
+    """Return True for terminal commands that invoke this tool itself."""
+    text = stringify_text(value).strip()
+    if not text:
+        return False
+    normalized = text.strip('` ')
+    return bool(CSR_DIRECT_COMMAND_RE.search(normalized) or CSR_PYTHON_COMMAND_RE.search(normalized))
+
+
+def is_csr_self_line(value):
+    text = stringify_text(value).strip()
+    if not text:
+        return False
+    if is_csr_self_command(text):
+        return True
+    # Common headings emitted by csr should not become high-signal facts when
+    # they appear in terminal output from a csr invocation.
+    return text in {
+        '# Agent Handoff',
+        '# CHAT SESSION',
+        '# INTERACTIVE SESSION',
+        '# CHAT TODO LIST',
+        '# AGENT SESSIONS',
+    }
 
 
 def add_unique_limited(target, value, limit=20):
@@ -449,6 +501,8 @@ def high_signal_lines(text, query=None, limit=12):
     for line in stringify_text(text).splitlines():
         original = line.strip()
         if not original:
+            continue
+        if is_csr_self_line(original):
             continue
         line_l = original.lower()
         score = 0
@@ -534,6 +588,8 @@ def summarize_tool_invocation(part):
         'durationMs': state.get('duration'),
         'uri': data.get('terminalCommandUri'),
     }
+    if is_csr_self_command(event.get('command')):
+        return None
     output = (data.get('terminalCommandOutput') or {}).get('text')
     if output:
         event['outputHighlights'] = high_signal_lines(output, limit=8)
@@ -662,10 +718,15 @@ def extract_response_parts(response_parts):
             past_tense_message = part.get('pastTenseMessage')
             invocation = invocation_message.get('value') if isinstance(invocation_message, dict) else invocation_message
             past = past_tense_message.get('value') if isinstance(past_tense_message, dict) else past_tense_message
-            append_unique_text(tool_texts, past or invocation)
             event = summarize_tool_invocation(part)
             if event:
+                append_unique_text(tool_texts, past or invocation)
                 tool_events.append(event)
+            else:
+                data = part.get('toolSpecificData') or {}
+                command_line = data.get('commandLine') or {}
+                if not is_csr_self_command(command_line.get('original') or command_line.get('forDisplay')):
+                    append_unique_text(tool_texts, past or invocation)
             continue
 
         append_unique_text(assistant_texts, part.get('value'))

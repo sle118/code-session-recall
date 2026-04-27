@@ -128,7 +128,10 @@ sections before recent-turn previews, and `csr handoff` reuses those indexed
 facts/text to emit a prompt-sized handoff. VS Code state scanning also derives
 compact records from `memento/chat-todo-list` and `agentSessions.model.cache`
 for todo and agent/subagent activity recall. The rows are not yet stored in
-dedicated SQLite tables.
+dedicated SQLite tables. Terminal/tool calls that invoke `csr` itself are
+treated as self-referential plumbing and are excluded from command/output
+facts, preventing handoff/list/search output from feeding back into future
+handoffs.
 
 ## Compression Heuristics
 

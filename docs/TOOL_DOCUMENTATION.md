@@ -183,7 +183,9 @@ The Copilot chat formatter now performs a first pass of deterministic fact
 extraction. For parsed `chatSessions/*.jsonl` sessions it surfaces compact
 sections for files, edited files, commands, errors, decisions/next steps,
 high-signal lines, and terminal/tool events before recent-turn previews. This is
-the extraction layer used by `handoff`.
+the extraction layer used by `handoff`. Terminal/tool events that invoke `csr`
+itself are filtered so `csr` command output does not get re-indexed as recall
+context.
 
 VS Code state scanning also indexes compact `vscode-live` records for
 `memento/interactive-session`, `memento/chat-todo-list`, and
