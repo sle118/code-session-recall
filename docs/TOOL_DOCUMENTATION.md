@@ -209,6 +209,11 @@ scan and retry. This supports the intended "run recall first" workflow in fresh
 agent sessions. If a `handoff`/`ask` query has no direct matches, it falls back
 to recent high-signal sessions instead of returning an empty packet.
 
+`list` is an inventory command for session-bearing records. By default it lists
+`vscode-copilot`, `vscode-live`, and `copilot-artifact` rows first so repository
+Markdown files do not crowd out actual recall history. Use `--source markdown`
+when intentionally listing indexed Markdown documents.
+
 For handoff ranking, chat/session sources are preferred over markdown docs when
 both match. Docs explain what exists; chat/session sources better capture what
 happened.

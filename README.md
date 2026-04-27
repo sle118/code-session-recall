@@ -28,6 +28,8 @@ Intended usage
 - Run `csr scan` after a focused work session (or let it be scheduled) to capture a session snapshot.
 - Run `csr` commands before using an expensive workspace-wide search or an LLM prompt to surface recent, relevant context.
 - Use `csr show <id>` to rehydrate a prior session when you need the exact commands, files, or checkpoints.
+- Use `csr list --json --limit 5` to inventory recent session/live records;
+  pass `--source markdown` only when you want indexed repository docs.
 
 Installation
 ------------

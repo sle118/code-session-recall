@@ -2393,6 +2393,10 @@ def cmd_list(limit=20, sources=None, json_out=False, current_session_only=False,
     conn = db()
     c = conn.cursor()
     candidate_limit = max(limit * 8, 80)
+    effective_sources = sources
+    default_session_sources = ['vscode-copilot', 'vscode-live', 'copilot-artifact']
+    if effective_sources is None:
+        effective_sources = default_session_sources
 
     def load_rows():
         params = []
@@ -2401,10 +2405,10 @@ def cmd_list(limit=20, sources=None, json_out=False, current_session_only=False,
             "sessions.title, sessions.created_at, coalesce(sessions.display_content, messages.content) "
             "FROM sessions JOIN messages ON sessions.id = messages.session_id"
         )
-        if sources:
-            placeholders = ','.join('?' for _ in sources)
+        if effective_sources:
+            placeholders = ','.join('?' for _ in effective_sources)
             sql += f" WHERE sessions.source IN ({placeholders})"
-            params.extend(sources)
+            params.extend(effective_sources)
         sql += " ORDER BY created_at DESC LIMIT ?"
         params.append(candidate_limit)
 
@@ -2422,11 +2426,17 @@ def cmd_list(limit=20, sources=None, json_out=False, current_session_only=False,
         return apply_workspace_filter(filtered, cursor=c, workspace_only=workspace_only)[:limit]
 
     rows = load_rows()
+    if not rows and sources is None:
+        effective_sources = None
+        rows = load_rows()
     if not rows and bootstrap:
         # Agents commonly run `list` before `handoff`. Make that first contact
         # useful in a fresh workspace without requiring a separate scan step.
         cmd_scan(verbose=False)
         rows = load_rows()
+        if not rows and sources is None:
+            effective_sources = None
+            rows = load_rows()
     if json_out:
         out = [
             {
