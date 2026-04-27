@@ -132,10 +132,18 @@ workspace storage path:
 %APPDATA%\Code - Insiders\User\workspaceStorage\<WORKSPACE_STORAGE_ID>\ms-python.python\pythonrc.py
 ```
 
+In VS Code remote containers / server environments, the same signal appears
+under the remote home directory:
+
+```text
+/root/.vscode-server-insiders/data/User/workspaceStorage/<WORKSPACE_STORAGE_ID>/ms-python.python/pythonrc.py
+```
+
 From that path, `csr` can infer:
 
 - VS Code profile root:
-  `%APPDATA%\Code - Insiders\User`
+  `%APPDATA%\Code - Insiders\User` or
+  `/root/.vscode-server-insiders/data/User`
 - Workspace storage root:
   `%APPDATA%\Code - Insiders\User\workspaceStorage`
 - Workspace storage id:
@@ -159,7 +167,9 @@ Recommended implementation order:
 4. Otherwise scan likely roots:
    `%APPDATA%\Code\User\workspaceStorage`,
    `%APPDATA%\Code - Insiders\User\workspaceStorage`,
-   and any user-supplied roots.
+   `~/.vscode-server/data/User/workspaceStorage`,
+   `~/.vscode-server-insiders/data/User/workspaceStorage`, and any
+   user-supplied roots.
 5. Use `chat.ChatSessionStore.index` to map session ids to titles and timings.
 6. Prefer matching by current workspace path, conversation title, newest timing,
    and terminal command metadata over hard-coded constants.

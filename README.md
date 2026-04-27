@@ -21,7 +21,8 @@ Core capabilities
 - Show: present a single session's details (checkpoints, files, commands, snippets).
 - Export: dump sessions or indexes for backup or sharing.
 - Workspace affinity: query commands prefer the current workspace by default,
-  with `--all-workspaces` available for intentional global recall.
+  deriving active VS Code `workspaceStorage/<id>` from `PYTHONSTARTUP` when
+  available, with `--all-workspaces` available for intentional global recall.
 
 Intended usage
 - Run `csr scan` after a focused work session (or let it be scheduled) to capture a session snapshot.

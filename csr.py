@@ -144,6 +144,44 @@ def should_include_chat_session(chat_session_id, current_session_only=False, exc
     return True
 
 
+def dedupe_paths(paths):
+    seen = set()
+    out = []
+    for path in paths:
+        if not path:
+            continue
+        path = Path(path)
+        key = str(path).lower()
+        if key not in seen:
+            seen.add(key)
+            out.append(path)
+    return out
+
+
+def workspace_dir_from_pythonstartup(value=None):
+    startup = value if value is not None else os.getenv("PYTHONSTARTUP")
+    if not startup:
+        return None
+    path = Path(startup)
+    for candidate in path.parents:
+        if candidate.parent.name == 'workspaceStorage':
+            return candidate
+    return None
+
+
+def active_workspace_storage_dirs():
+    dirs = []
+    explicit_dir = os.getenv("CSR_VSCODE_WORKSPACE_DIR")
+    if explicit_dir:
+        dirs.append(Path(explicit_dir))
+
+    startup_workspace = workspace_dir_from_pythonstartup()
+    if startup_workspace:
+        dirs.append(startup_workspace)
+
+    return dedupe_paths(dirs)
+
+
 def workspace_storage_candidates():
     roots = []
     explicit = os.getenv("CSR_VSCODE_WORKSPACE_STORAGE")
@@ -159,14 +197,35 @@ def workspace_storage_candidates():
             appdata_path / "VSCodium" / "User" / "workspaceStorage",
         ])
 
-    seen = set()
-    out = []
-    for path in roots:
-        key = str(path).lower()
-        if key not in seen:
-            seen.add(key)
-            out.append(path)
-    return out
+    home = os.getenv("HOME")
+    if home:
+        home_path = Path(home)
+        roots.extend([
+            home_path / ".config" / "Code" / "User" / "workspaceStorage",
+            home_path / ".config" / "Code - Insiders" / "User" / "workspaceStorage",
+            home_path / ".config" / "VSCodium" / "User" / "workspaceStorage",
+            home_path / ".vscode-server" / "data" / "User" / "workspaceStorage",
+            home_path / ".vscode-server-insiders" / "data" / "User" / "workspaceStorage",
+        ])
+
+    return dedupe_paths(roots)
+
+
+def workspace_storage_dirs():
+    dirs = list(active_workspace_storage_dirs())
+    for root in workspace_storage_candidates():
+        if not root.exists():
+            continue
+        if (root / 'state.vscdb').exists() or (root / 'chatSessions').exists():
+            dirs.append(root)
+            continue
+        try:
+            for child in root.iterdir():
+                if child.is_dir() and ((child / 'state.vscdb').exists() or (child / 'chatSessions').exists()):
+                    dirs.append(child)
+        except Exception:
+            continue
+    return dedupe_paths(dirs)
 
 
 # ----------------------------
@@ -1540,64 +1599,64 @@ def friendly_vscode_state_title(key, fallback_title=None):
 def scan_vscode():
     sessions = []
 
-    for base in workspace_storage_candidates():
-        if not base.exists():
+    for workspace_dir in workspace_storage_dirs():
+        dbfile = workspace_dir / "state.vscdb"
+        if not dbfile.exists():
             continue
 
-        for dbfile in base.rglob("state.vscdb"):
-            try:
-                conn = sqlite3.connect(dbfile)
-                c = conn.cursor()
+        try:
+            conn = sqlite3.connect(dbfile)
+            c = conn.cursor()
 
-                rows = c.execute("SELECT key, value FROM ItemTable").fetchall()
+            rows = c.execute("SELECT key, value FROM ItemTable").fetchall()
 
-                for key, value in rows:
-                    if not key:
+            for key, value in rows:
+                if not key:
+                    continue
+
+                if not should_index_vscode_state_key(key):
+                    continue
+                raw_value = value
+                decoded = try_decode(value)
+                if decoded is None:
+                    continue
+
+                # Try key-specific formatter first; formatter returns full string or None to fallback
+                formatted = format_payload_for_key(key, decoded, raw_value)
+                if formatted is not None:
+                    content = formatted
+                else:
+                    msgs = []
+                    if isinstance(decoded, (dict, list)):
+                        msgs = extract_messages(decoded)
+                    elif isinstance(decoded, str):
+                        try:
+                            parsed = json.loads(decoded)
+                            msgs = extract_messages(parsed)
+                        except Exception:
+                            msgs = [decoded]
+
+                    if not msgs:
                         continue
 
-                    if not should_index_vscode_state_key(key):
-                        continue
-                    raw_value = value
-                    decoded = try_decode(value)
-                    if decoded is None:
-                        continue
+                    content = "\n".join(msgs)
 
-                    # Try key-specific formatter first; formatter returns full string or None to fallback
-                    formatted = format_payload_for_key(key, decoded, raw_value)
-                    if formatted is not None:
-                        content = formatted
-                    else:
-                        msgs = []
-                        if isinstance(decoded, (dict, list)):
-                            msgs = extract_messages(decoded)
-                        elif isinstance(decoded, str):
-                            try:
-                                parsed = json.loads(decoded)
-                                msgs = extract_messages(parsed)
-                            except Exception:
-                                msgs = [decoded]
+                sid = hid(str(dbfile) + key)
+                inferred_title = infer_title_from_state_db(dbfile)
 
-                        if not msgs:
-                            continue
+                sessions.append({
+                    "id": sid,
+                    "source": "vscode-live",
+                    "path": f"{dbfile}::{key}",
+                    "chat_session_id": infer_current_chat_session_id_from_state_db(dbfile),
+                    "title": friendly_vscode_state_title(key, fallback_title=inferred_title),
+                    "created_at": envelope_last_timestamp_iso(decoded) or path_mtime_iso(dbfile),
+                    "content": content,
+                    "display_content": content,
+                })
 
-                        content = "\n".join(msgs)
-
-                    sid = hid(str(dbfile) + key)
-                    inferred_title = infer_title_from_state_db(dbfile)
-
-                    sessions.append({
-                        "id": sid,
-                        "source": "vscode-live",
-                        "path": f"{dbfile}::{key}",
-                        "chat_session_id": infer_current_chat_session_id_from_state_db(dbfile),
-                        "title": friendly_vscode_state_title(key, fallback_title=inferred_title),
-                        "created_at": envelope_last_timestamp_iso(decoded) or path_mtime_iso(dbfile),
-                        "content": content,
-                        "display_content": content,
-                    })
-
-            except:
-                continue
+        except:
+            continue
 
     return sessions
 
@@ -1606,13 +1665,9 @@ def scan_copilot_chat_dirs():
     """Scan VS Code workspaceStorage for GitHub.copilot-chat session files.
     Returns list of session dicts {id, source, path, content}
     """
-    base = Path(os.getenv("APPDATA", "")) / "Code" / "User" / "workspaceStorage"
-    if not base.exists():
-        return []
-
     sessions = []
 
-    for ws in base.iterdir():
+    for ws in workspace_storage_dirs():
         chat_dir = ws / "GitHub.copilot-chat" / "chat-session-resources"
         if not chat_dir.exists():
             continue
@@ -1686,12 +1741,8 @@ def scan_copilot_chat_dirs():
 
 
 def scan_chat_sessions():
-    base = Path(os.getenv('APPDATA', '')) / 'Code' / 'User' / 'workspaceStorage'
-    if not base.exists():
-        return []
-
     sessions = []
-    for ws in base.iterdir():
+    for ws in workspace_storage_dirs():
         chat_dir = ws / 'chatSessions'
         state_db_path = ws / 'state.vscdb'
         if not chat_dir.exists():
@@ -2462,11 +2513,17 @@ def cmd_export(current_session_only=False, exclude_current_session=False,
 
 
 def cmd_health():
-    base = Path(os.getenv("APPDATA", "")) / "Code" / "User" / "workspaceStorage"
+    startup_workspace = workspace_dir_from_pythonstartup()
 
-    print("DB:", DB_PATH)
-    print("VSCode storage exists:", base.exists())
-    print("Workspace:", os.getcwd())
+    print("DB:", sanitize_handoff_text(DB_PATH))
+    print("Workspace:", sanitize_handoff_text(os.getcwd()))
+    print("PYTHONSTARTUP workspace:", sanitize_handoff_text(startup_workspace) if startup_workspace else "-")
+    print("VS Code workspace dirs:")
+    dirs = workspace_storage_dirs()
+    if not dirs:
+        print("- none found")
+    for path in dirs[:20]:
+        print("-", sanitize_handoff_text(path))
 
 
 def cmd_install_instructions():

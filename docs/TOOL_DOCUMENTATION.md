@@ -196,8 +196,11 @@ state, and agent/subagent session summaries without dumping raw persisted JSON.
 a query it searches matching sessions; without a query it falls back to recent
 high-signal indexed sessions.
 
-By default, `handoff`, `search`, and `list` apply current-workspace affinity:
-rows whose path or formatted content mention the current working directory are
+By default, `handoff`, `search`, and `list` apply current-workspace affinity.
+When available, `PYTHONSTARTUP` is used to derive the active VS Code
+`workspaceStorage/<id>` directory directly, including remote-container paths
+such as `~/.vscode-server-insiders/data/User/workspaceStorage/<id>`. Rows whose
+path or formatted content mention the current working directory are also
 preferred, and unrelated workspace sessions are hidden when current-workspace
 records exist. Use `--all-workspaces` for intentional cross-workspace recall.
 
@@ -212,7 +215,7 @@ happened.
 
 ### Highest Priority
 
-- **VS Code storage discovery**: support Stable (`Code`), Insiders (`Code - Insiders`), and user-supplied roots. Discovery should use environment-derived paths such as `APPDATA`, `TERM_PROGRAM_VERSION`, `VSCODE_*`, and terminal/tool metadata captured in Copilot sessions.
+- **VS Code storage discovery**: support Stable (`Code`), Insiders (`Code - Insiders`), VS Code Server / remote containers, and user-supplied roots. Discovery uses environment-derived paths such as `PYTHONSTARTUP`, `APPDATA`, `HOME`, `TERM_PROGRAM_VERSION`, `VSCODE_*`, and terminal/tool metadata captured in Copilot sessions.
 - **Session discovery**: continue improving active workspace/session data from `chat.ChatSessionStore.index`, `chatSessions/*.jsonl`, terminal command metadata, and conversation titles rather than hard-coded `WORKSPACE_CURRENT_CHAT_SESSION_ID` values. A first-pass current-workspace affinity filter now exists for query commands.
 - **Environment-aware recall**: index Copilot terminal/tool records, including command, cwd, language, exit code, command URI, terminal output, and useful environment variables. This helps future scans locate the right database/session without guessing.
 - **Deterministic handoff compression**: continue refining `csr handoff <query>` as a local extractor plus heuristic compressor. It emits compact agent-ready markdown from matched sessions, files, commands, errors, decisions, and next steps. See `docs/HANDOFF_DESIGN.md`.
