@@ -152,6 +152,8 @@ From that path, `csr` can infer:
   `...\workspaceStorage\<WORKSPACE_STORAGE_ID>\state.vscdb`
 - Chat sessions directory:
   `...\workspaceStorage\<WORKSPACE_STORAGE_ID>\chatSessions`
+- Newer Copilot transcript directory:
+  `...\workspaceStorage\<WORKSPACE_STORAGE_ID>\GitHub.copilot-chat\transcripts`
 
 ## Discovery Strategy
 
@@ -163,7 +165,8 @@ Recommended implementation order:
 2. Parse any Copilot terminal/tool records already indexed. Use
    `terminalCommandUri.path`, `cwd`, command output, and environment dumps.
 3. If `PYTHONSTARTUP` points inside `workspaceStorage/<id>/...`, derive the
-   workspace storage id and use the sibling `state.vscdb` and `chatSessions`.
+   workspace storage id and use the sibling `state.vscdb`, `chatSessions`, and
+   `GitHub.copilot-chat/transcripts`.
 4. Otherwise scan likely roots:
    `%APPDATA%\Code\User\workspaceStorage`,
    `%APPDATA%\Code - Insiders\User\workspaceStorage`,

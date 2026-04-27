@@ -3,7 +3,7 @@ import os, sys, sqlite3, json, hashlib, zlib, argparse, gzip, re
 from pathlib import Path
 from datetime import datetime, timezone
 
-__version__ = "0.1.2"
+__version__ = "0.1.3"
 
 try:
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')
@@ -453,7 +453,7 @@ PATH_RE = re.compile(
     r'(?i)(?:[A-Z]:\\[^\s"<>|]+|/(?:home|users|mnt|var|tmp|etc|opt|workspace|workspaces)/[^\s"<>|]+|/[a-z]/[^\s"<>|]+|[\w./\\-]+\.(?:py|md|json|jsonl|sqlite|vscdb|txt|ps1|sh|ts|tsx|js|jsx|yaml|yml))'
 )
 COMMAND_RE = re.compile(r'(?i)\b(?:python|py|git|rg|grep|find|Get-ChildItem|Select-String|npm|pnpm|yarn|pytest|pip|uv|csr)\b')
-COMMAND_LINE_RE = re.compile(r'(?i)^\s*(?:[-*]\s*)?`?(?:(?:python|py|git|rg|grep|find|Get-ChildItem|Select-String|npm|pnpm|yarn|pytest|pip|uv)\b|csr\s+[a-z][\w-]*)')
+COMMAND_LINE_RE = re.compile(r'(?i)^\s*`?(?:(?:python|py|git|rg|grep|find|Get-ChildItem|Select-String|npm|pnpm|yarn|pytest|pip|uv)\b|csr\s+[a-z][\w-]*)')
 ERROR_RE = re.compile(r'(?i)\b(?:error|exception|traceback|failed|denied|missing|timeout|out of memory|heap|not found|exit code [1-9])\b')
 NEXT_RE = re.compile(r'(?i)\b(?:todo|next|follow-?up|roadmap|planned|blocked|issue|fixme|later)\b')
 DECISION_RE = re.compile(r'(?i)\b(?:decision|decided|choose|chosen|approach|rationale|tradeoff|trade-off|we will|should)\b')
@@ -508,6 +508,16 @@ def is_csr_self_line(value):
         '# INTERACTIVE SESSION',
         '# CHAT TODO LIST',
         '# AGENT SESSIONS',
+    }
+
+
+def is_terminal_tool_name(value):
+    return stringify_text(value).strip().lower() in {
+        'run_in_terminal',
+        'terminal',
+        'shell',
+        'execute_command',
+        'run_command',
     }
 
 
@@ -758,6 +768,186 @@ def load_chat_session_state(jsonl_path):
         return None
 
     return state
+
+
+def load_jsonl_records(jsonl_path, limit=None):
+    records = []
+    try:
+        with open(jsonl_path, 'r', encoding='utf-8') as handle:
+            for line in handle:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    records.append(json.loads(line))
+                except Exception:
+                    continue
+                if limit and len(records) >= limit:
+                    break
+    except Exception:
+        return []
+    return records
+
+
+def parse_copilot_transcript_records(records):
+    if not isinstance(records, list) or not records:
+        return None
+
+    session_id = None
+    timestamps = []
+    user_messages = []
+    assistant_messages = []
+    tool_events = []
+    todo_items = []
+    self_tool_call_ids = set()
+    search_chunks = []
+    facts = {
+        'files': [],
+        'commands': [],
+        'errors': [],
+        'nextSteps': [],
+        'highlights': [],
+        'editedFiles': [],
+        'toolEvents': [],
+    }
+
+    for i, record in enumerate(records):
+        if not isinstance(record, dict):
+            continue
+        record_type = record.get('type') or ''
+        data = record.get('data') if isinstance(record.get('data'), dict) else {}
+        ts = parse_timestamp(record.get('timestamp'))
+        if ts:
+            timestamps.append(ts)
+        if record_type == 'session.start':
+            session_id = data.get('sessionId') or session_id
+            continue
+
+        if record_type == 'user.message':
+            text = stringify_text(data.get('content')).strip()
+            if text:
+                preview = clip_text(text, 240)
+                user_messages.append({'i': i, 'ts': ts, 'preview': preview})
+                search_chunks.append(f'USER\n{text}')
+                merge_facts(facts, extract_facts_from_text(text), limit=40)
+            for path in collect_uri_paths(data.get('attachments') or []):
+                add_unique_limited(facts['files'], path, limit=40)
+            continue
+
+        if record_type == 'assistant.message':
+            text = stringify_text(data.get('content')).strip()
+            if text:
+                preview = clip_text(text, 240)
+                assistant_messages.append({'i': i, 'ts': ts, 'preview': preview})
+                search_chunks.append(f'ASSISTANT\n{text}')
+                merge_facts(facts, extract_facts_from_text(text), limit=40)
+            for tool in data.get('toolRequests') or []:
+                if not isinstance(tool, dict):
+                    continue
+                tool_name = tool.get('name') or 'tool'
+                args_text = stringify_text(tool.get('arguments')).strip()
+                event = {'kind': tool_name, 'toolId': tool.get('toolCallId')}
+                skip_args_facts = False
+                if args_text:
+                    try:
+                        args_obj = json.loads(args_text)
+                    except Exception:
+                        args_obj = None
+                    if isinstance(args_obj, dict):
+                        command = args_obj.get('command')
+                        if command and not is_terminal_tool_name(tool_name):
+                            event['command'] = command
+                        elif command:
+                            if is_csr_self_command(command):
+                                skip_args_facts = True
+                                if tool.get('toolCallId'):
+                                    self_tool_call_ids.add(tool.get('toolCallId'))
+                            else:
+                                event['command'] = command
+                                add_unique_limited(facts['commands'], command, limit=40)
+                                search_chunks.append(f'COMMAND\n{command}')
+                        for key in ('filePath', 'path', 'cwd'):
+                            if args_obj.get(key):
+                                add_unique_limited(facts['files'], args_obj.get(key), limit=40)
+                        for path in collect_uri_paths(args_obj):
+                            add_unique_limited(facts['files'], path, limit=40)
+                        if tool_name == 'manage_todo_list':
+                            for todo in args_obj.get('todoList') or []:
+                                if isinstance(todo, dict):
+                                    title = sanitize_handoff_text(clip_text(todo.get('title') or '(untitled todo)', 180))
+                                    status = clip_text(todo.get('status') or 'unknown', 40)
+                                    todo_items.append({'title': title, 'status': status})
+                                    add_unique_limited(facts['nextSteps'], f"todo status={status} title={title}", limit=40)
+                    if not skip_args_facts:
+                        merge_facts(facts, extract_facts_from_text(args_text), limit=40)
+                if event.get('command') or tool_name not in ('run_in_terminal',):
+                    add_unique_limited(facts['toolEvents'], event, limit=40)
+                    tool_events.append(event)
+            continue
+
+        if record_type.startswith('tool.execution'):
+            tool_call_id = data.get('toolCallId')
+            if tool_call_id in self_tool_call_ids:
+                continue
+            tool_name = data.get('toolName') or record_type
+            args_obj = data.get('arguments') if isinstance(data.get('arguments'), dict) else {}
+            event = {'kind': tool_name, 'toolId': tool_call_id, 'status': record_type}
+            command = args_obj.get('command')
+            if command and not is_terminal_tool_name(tool_name):
+                event['command'] = command
+            elif command:
+                if is_csr_self_command(command):
+                    if tool_call_id:
+                        self_tool_call_ids.add(tool_call_id)
+                    continue
+                event['command'] = command
+                add_unique_limited(facts['commands'], command, limit=40)
+                search_chunks.append(f'COMMAND\n{command}')
+            for key in ('filePath', 'path', 'cwd'):
+                if args_obj.get(key):
+                    add_unique_limited(facts['files'], args_obj.get(key), limit=40)
+            for path in collect_uri_paths(args_obj):
+                add_unique_limited(facts['files'], path, limit=40)
+            if data.get('success') is False:
+                msg = f"tool failed kind={tool_name}"
+                add_unique_limited(facts['errors'], msg, limit=40)
+            add_unique_limited(facts['toolEvents'], event, limit=40)
+            tool_events.append(event)
+
+    if not user_messages and not assistant_messages and not tool_events and not todo_items:
+        return None
+
+    summary = {
+        'recordCount': len(records),
+        'userMessageCount': len(user_messages),
+        'assistantMessageCount': len(assistant_messages),
+        'toolEventCount': len(tool_events),
+        'todoCount': len(todo_items),
+        'sessionId': session_id,
+    }
+    if timestamps:
+        first_ts = min(timestamps)
+        last_ts = max(timestamps)
+        summary['firstTimestamp'] = first_ts.isoformat().replace('+00:00', 'Z')
+        summary['lastTimestamp'] = last_ts.isoformat().replace('+00:00', 'Z')
+        summary['timeRangeHuman'] = f"{first_ts.strftime('%Y-%m-%d %H:%M:%S UTC')} -> {last_ts.strftime('%Y-%m-%d %H:%M:%S UTC')}"
+
+    return {
+        'summary': summary,
+        'facts': {k: v for k, v in facts.items() if v},
+        'recentUserMessages': user_messages[-8:],
+        'recentAssistantMessages': assistant_messages[-4:],
+        'todoItems': todo_items[-12:],
+        'searchText': '\n\n'.join(search_chunks),
+    }
+
+
+def first_nonempty_transcript_prompt(envelope):
+    for item in envelope.get('recentUserMessages') or []:
+        preview = stringify_text(item.get('preview')).strip()
+        if preview:
+            return clip_text(preview, 80)
+    return None
 
 
 def extract_response_parts(response_parts):
@@ -1047,6 +1237,87 @@ def format_chat_session_transcript(state, title=None, entry=None):
     }
     lines.append('----- JSON -----')
     lines.append(json.dumps(json_payload, ensure_ascii=False, indent=2))
+    return '\n'.join(lines)
+
+
+def format_copilot_transcript_records(records, title=None):
+    envelope = parse_copilot_transcript_records(records)
+    if not envelope:
+        return format_raw_payload(records)
+
+    summary = envelope.get('summary') or {}
+    facts = envelope.get('facts') or {}
+    lines = []
+    lines.append('# COPILOT TRANSCRIPT')
+    if title:
+        lines.append(f'Title: {title}')
+    lines.append(
+        f"Records: {summary.get('recordCount')} | user messages: {summary.get('userMessageCount')} "
+        f"| assistant messages: {summary.get('assistantMessageCount')} | tool events: {summary.get('toolEventCount')}"
+    )
+    if summary.get('sessionId'):
+        lines.append(f"Session id: {summary.get('sessionId')}")
+    if summary.get('timeRangeHuman'):
+        lines.append(f"Time range: {summary.get('timeRangeHuman')}")
+    lines.append('')
+
+    def add_section(label, values, limit=10):
+        values = values or []
+        if not values:
+            return
+        lines.append(f'{label}:')
+        for value in values[:limit]:
+            if isinstance(value, dict):
+                bits = []
+                for key in ('kind', 'status', 'command', 'toolId'):
+                    if value.get(key):
+                        bits.append(f'{key}={sanitize_handoff_text(value.get(key))}')
+                lines.append(f"- {' | '.join(bits)}")
+            else:
+                lines.append(f'- {sanitize_handoff_text(value)}')
+        lines.append('')
+
+    add_section('Files mentioned', facts.get('files'), limit=12)
+    add_section('Commands mentioned', facts.get('commands'), limit=10)
+    add_section('Errors mentioned', facts.get('errors'), limit=8)
+    add_section('Decisions / next steps', facts.get('nextSteps'), limit=10)
+    add_section('Other high-signal lines', facts.get('highlights'), limit=8)
+    add_section('Tool events', facts.get('toolEvents'), limit=10)
+
+    if envelope.get('todoItems'):
+        lines.append('Todos:')
+        for todo in envelope.get('todoItems') or []:
+            lines.append(f"- status={todo.get('status')} title={todo.get('title')}")
+        lines.append('')
+
+    lines.append('Recent user messages:')
+    for item in envelope.get('recentUserMessages') or []:
+        ts = item.get('ts').isoformat().replace('+00:00', 'Z') if item.get('ts') else 'unknown-time'
+        lines.append(f"- {ts} | i={item.get('i')} | {sanitize_handoff_text(item.get('preview'))}")
+    lines.append('')
+
+    json_payload = {
+        'summary': summary,
+        'facts': {
+            'files': (facts.get('files') or [])[:20],
+            'commands': (facts.get('commands') or [])[:20],
+            'errors': (facts.get('errors') or [])[:20],
+            'nextSteps': (facts.get('nextSteps') or [])[:20],
+            'highlights': (facts.get('highlights') or [])[:20],
+            'toolEvents': (facts.get('toolEvents') or [])[:12],
+        },
+        'recentUserMessages': [
+            {
+                'i': item.get('i'),
+                'ts': item.get('ts').isoformat().replace('+00:00', 'Z') if item.get('ts') else None,
+                'preview': item.get('preview'),
+            }
+            for item in envelope.get('recentUserMessages') or []
+        ],
+        'todoItems': envelope.get('todoItems') or [],
+    }
+    lines.append('----- JSON -----')
+    lines.append(json.dumps(json_payload, ensure_ascii=False, indent=2, default=str))
     return '\n'.join(lines)
 
 
@@ -1745,38 +2016,59 @@ def scan_copilot_chat_dirs():
 def scan_chat_sessions():
     sessions = []
     for ws in workspace_storage_dirs():
-        chat_dir = ws / 'chatSessions'
+        chat_dirs = [
+            ws / 'chatSessions',
+            ws / 'GitHub.copilot-chat' / 'transcripts',
+        ]
         state_db_path = ws / 'state.vscdb'
-        if not chat_dir.exists():
-            continue
 
-        for jsonl_file in chat_dir.glob('*.jsonl'):
-            session_id = jsonl_file.stem
-            state = load_chat_session_state(jsonl_file)
-            if not state:
+        for chat_dir in chat_dirs:
+            if not chat_dir.exists():
                 continue
 
-            entry = lookup_chat_session_entry(session_id, state_db_path)
-            title = state.get('customTitle') or entry.get('title')
-            envelope = parse_chat_session_state(state, entry=entry)
-            formatted = format_chat_session_transcript(state, title=title, entry=entry)
-            created_at = envelope_last_timestamp_iso(state) or entry_timestamp_iso(entry) or path_mtime_iso(jsonl_file)
-            search_parts = []
-            if title:
-                search_parts.append(title)
-            if envelope and envelope.get('searchText'):
-                search_parts.append(envelope['searchText'])
+            for jsonl_file in chat_dir.glob('*.jsonl'):
+                session_id = jsonl_file.stem
+                entry = lookup_chat_session_entry(session_id, state_db_path)
+                title = entry.get('title') if isinstance(entry, dict) else None
+                created_at = None
+                search_parts = []
 
-            sessions.append({
-                'id': hid(str(jsonl_file)),
-                'source': 'vscode-copilot',
-                'path': str(jsonl_file),
-                'chat_session_id': session_id,
-                'title': title,
-                'created_at': created_at,
-                'content': '\n\n'.join(search_parts) or formatted,
-                'display_content': formatted,
-            })
+                if chat_dir.name == 'transcripts':
+                    records = load_jsonl_records(jsonl_file)
+                    envelope = parse_copilot_transcript_records(records)
+                    if not envelope:
+                        continue
+                    title = title or first_nonempty_transcript_prompt(envelope) or session_id
+                    formatted = format_copilot_transcript_records(records, title=title)
+                    created_at = (envelope.get('summary') or {}).get('firstTimestamp') or path_mtime_iso(jsonl_file)
+                    if title:
+                        search_parts.append(title)
+                    if envelope.get('searchText'):
+                        search_parts.append(envelope['searchText'])
+                else:
+                    state = load_chat_session_state(jsonl_file)
+                    if not state:
+                        continue
+
+                    title = state.get('customTitle') or title
+                    envelope = parse_chat_session_state(state, entry=entry)
+                    formatted = format_chat_session_transcript(state, title=title, entry=entry)
+                    created_at = envelope_last_timestamp_iso(state) or entry_timestamp_iso(entry) or path_mtime_iso(jsonl_file)
+                    if title:
+                        search_parts.append(title)
+                    if envelope and envelope.get('searchText'):
+                        search_parts.append(envelope['searchText'])
+
+                sessions.append({
+                    'id': hid(str(jsonl_file)),
+                    'source': 'vscode-copilot',
+                    'path': str(jsonl_file),
+                    'chat_session_id': session_id,
+                    'title': title,
+                    'created_at': created_at,
+                    'content': '\n\n'.join(search_parts) or formatted,
+                    'display_content': formatted,
+                })
 
     return sessions
 

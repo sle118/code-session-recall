@@ -191,6 +191,10 @@ VS Code state scanning also indexes compact `vscode-live` records for
 `memento/interactive-session`, `memento/chat-todo-list`, and
 `agentSessions.model.cache`. These records expose prompt trails, Copilot todo
 state, and agent/subagent session summaries without dumping raw persisted JSON.
+For newer VS Code/Copilot remote layouts, CSR also indexes
+`GitHub.copilot-chat/transcripts/*.jsonl` transcript streams, including compact
+user messages, assistant messages, tool events, file references, and todo-list
+updates.
 
 `handoff` emits a capped markdown packet for direct agent prompt injection. With
 a query it searches matching sessions; without a query it falls back to recent

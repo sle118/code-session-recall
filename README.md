@@ -12,8 +12,9 @@ Inspiration: CSR is inspired by Desi Villanueva's article
 and the related [`auto-memory`](https://github.com/dezgit2025/auto-memory)
 project. `auto-memory` targets Copilot CLI's local session database. CSR applies
 the same recall-first idea to VS Code/GitHub Copilot, where useful state is
-spread across VS Code workspace storage, chat session JSONL files, extension
-artifacts, and state databases rather than one easy-to-query CLI database.
+spread across VS Code workspace storage, chat session JSONL/transcript files,
+extension artifacts, and state databases rather than one easy-to-query CLI
+database.
 
 Core capabilities
 - Scan and index: crawl specified folders and extract session metadata and touched files.
