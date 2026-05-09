@@ -17,7 +17,9 @@ extension artifacts, and state databases rather than one easy-to-query CLI
 database.
 
 Core capabilities
-- Scan and index: crawl specified folders and extract session metadata and touched files.
+- Scan and index: extract session metadata and touched files from active
+  VS Code/Copilot storage; repository Markdown indexing is opt-in for large
+  workspaces.
 - Search: full-text search across indexed sessions and extracted text artifacts.
 - Show: present a single session's details (checkpoints, files, commands, snippets).
 - Export: dump sessions or indexes for backup or sharing.
@@ -105,11 +107,13 @@ Key record types and what they provide
 Usage (examples)
 
 python csr.py scan
+python csr.py scan --include-markdown
 python csr.py handoff "keyword"
 python csr.py handoff
 python csr.py ask "question" --json
 python csr.py handoff "keyword" --json
 python csr.py search "keyword"
+python csr.py search "rare keyword" --deep
 python csr.py show <id> --json
 python csr.py install-instructions
 python csr.py export --out sessions.ndjson

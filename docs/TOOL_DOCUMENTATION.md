@@ -95,14 +95,23 @@ Index and catalog sessions from your workspace and VS Code session stores.
 
 ```bash
 python csr.py scan
+python csr.py scan --include-markdown
+python csr.py scan --max-transcripts 200
 ```
 
 **What it does:**
-- Crawls specified workspace folders
-- Extracts session metadata from VS Code storage
+- Extracts session metadata from the active VS Code workspace storage when it
+  can be inferred from environment state such as `PYTHONSTARTUP`
 - Identifies touched files and small content excerpts
 - Indexes terminal history and commands
 - Updates the local database with new records
+- Caps newer Copilot transcript scanning to recent files by default
+
+Repository Markdown scanning is opt-in with `--include-markdown` or
+`CSR_SCAN_MARKDOWN=1`. Set `CSR_MAX_TRANSCRIPTS=N` or pass
+`--max-transcripts N` to tune transcript scanning; `0` means unlimited. Set
+`CSR_SCAN_ALL_WORKSPACES=1` only when intentionally scanning every discovered
+VS Code workspace storage directory.
 
 ### search
 Full-text search across all indexed sessions and artifacts.
@@ -110,11 +119,13 @@ Full-text search across all indexed sessions and artifacts.
 ```bash
 python csr.py search "keyword"
 python csr.py search "function_name" --json
+python csr.py search "rare string" --deep
 ```
 
 **Options:**
 - `--json`: Output results in JSON format
 - `--limit N`: Limit results to N records
+- `--deep`: Also run the slower content `LIKE` fallback after FTS search
 - Search term: Any keyword, function name, file path, or phrase
 
 **Returns:**
@@ -208,10 +219,13 @@ path or formatted content mention the current working directory are also
 preferred, and unrelated workspace sessions are hidden when current-workspace
 records exist. Use `--all-workspaces` for intentional cross-workspace recall.
 
-If the index is empty, `handoff`, `ask`, and `list` perform one silent local
-scan and retry. This supports the intended "run recall first" workflow in fresh
-agent sessions. If a `handoff`/`ask` query has no direct matches, it falls back
-to recent high-signal sessions instead of returning an empty packet.
+If the index is empty, `handoff`, `ask`, and `list` perform one silent fast
+local scan and retry. This supports the intended "run recall first" workflow in
+fresh agent sessions. The bootstrap scan is session-first: it prefers the active
+VS Code workspace storage, caps transcript history, and does not crawl
+repository Markdown unless explicitly requested. If a `handoff`/`ask` query has
+no direct matches, it falls back to recent high-signal sessions instead of
+returning an empty packet.
 
 `list` is an inventory command for session-bearing records. By default it lists
 only `vscode-copilot`, `vscode-live`, and `copilot-artifact` rows so repository

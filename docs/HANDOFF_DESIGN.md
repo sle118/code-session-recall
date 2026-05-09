@@ -42,11 +42,14 @@ The command should:
 Current implementation status: `csr handoff` exists. `csr ask` is an alias for
 the same deterministic packet. The command searches indexed sessions when given
 a query and falls back to recent/high-signal sessions when called without one.
-If the index is empty, `handoff`, `ask`, and `list` perform one silent local scan
-and retry. Handoff emits capped markdown or JSON and avoids raw transcript
-dumps. If a query has no direct matches, handoff falls back to recent
-high-signal sessions so weak agent guesses still return orientation context.
-Scoring is intentionally simple and deterministic.
+If the index is empty, `handoff`, `ask`, and `list` perform one silent fast
+local scan and retry. The bootstrap scan is designed for the "run first" path:
+it prefers the active workspace storage when environment state identifies one,
+caps transcript scanning to recent JSONL files, and skips repository Markdown by
+default. Handoff emits capped markdown or JSON and avoids raw transcript dumps.
+If a query has no direct matches, handoff falls back to recent high-signal
+sessions so weak agent guesses still return orientation context. Scoring is
+intentionally simple and deterministic.
 
 Example shape:
 
@@ -135,6 +138,13 @@ handoffs. Query commands also apply a first-pass current-workspace affinity
 filter by default, using path evidence from indexed rows to avoid conflating
 sessions from other repositories/workspaces. Use `--all-workspaces` to opt out
 when global recall is intentional.
+
+Performance matters because agents are instructed to run recall before
+reasoning. Slow fallback search paths are opt-in: `search --deep` enables the
+content `LIKE` fallback, `scan --include-markdown` indexes repository Markdown,
+`scan --max-transcripts N` tunes transcript breadth, and
+`CSR_SCAN_ALL_WORKSPACES=1` allows scanning every discovered VS Code workspace
+storage directory.
 
 ## Compression Heuristics
 

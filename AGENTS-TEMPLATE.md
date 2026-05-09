@@ -69,10 +69,17 @@ python code-session-recall/csr.py health
 ```
 
 `handoff`, `ask`, and `list` bootstrap an empty local index by running one
-silent scan, so they are safe to use as first recall commands in a fresh
-workspace. If a query has no direct matches, `handoff`/`ask` fall back to recent
-high-signal sessions. `ask` does not call an LLM; it is just a natural-language
-alias for the deterministic handoff packet.
+silent fast scan, so they are safe to use as first recall commands in a fresh
+workspace. The bootstrap scan is session-first: it prefers the active VS Code
+workspace storage, caps transcript history, and skips repository Markdown unless
+explicitly requested. If a query has no direct matches, `handoff`/`ask` fall
+back to recent high-signal sessions. `ask` does not call an LLM; it is just a
+natural-language alias for the deterministic handoff packet.
+
+Keep recall cheap enough that agents will actually use it. Use `csr search
+'<term>' --deep` only for rare misses, `csr scan --include-markdown` only when
+repository docs should be indexed, and `CSR_SCAN_ALL_WORKSPACES=1` only for
+intentional cross-workspace recall.
 
 CSR filters terminal/tool invocations of `csr` itself so command output from
 recall operations does not feed back into future recall packets.

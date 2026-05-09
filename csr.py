@@ -3,7 +3,7 @@ import os, sys, sqlite3, json, hashlib, zlib, argparse, gzip, re
 from pathlib import Path
 from datetime import datetime, timezone
 
-__version__ = "0.1.4"
+__version__ = "0.1.5"
 
 try:
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')
@@ -215,6 +215,8 @@ def workspace_storage_candidates():
 
 def workspace_storage_dirs():
     dirs = list(active_workspace_storage_dirs())
+    if dirs and os.getenv("CSR_SCAN_ALL_WORKSPACES", "").lower() not in ("1", "true", "yes"):
+        return dedupe_paths(dirs)
     for root in workspace_storage_candidates():
         if not root.exists():
             continue
@@ -228,6 +230,16 @@ def workspace_storage_dirs():
         except Exception:
             continue
     return dedupe_paths(dirs)
+
+
+def env_int(name, default):
+    raw = os.getenv(name)
+    if raw is None or raw == '':
+        return default
+    try:
+        return int(raw)
+    except Exception:
+        return default
 
 
 # ----------------------------
@@ -2124,7 +2136,18 @@ def scan_copilot_chat_dirs():
     return sessions
 
 
-def scan_chat_sessions():
+def limited_jsonl_files(chat_dir, max_files=None):
+    try:
+        files = [p for p in chat_dir.glob('*.jsonl') if p.is_file()]
+    except Exception:
+        return []
+    files.sort(key=lambda p: p.stat().st_mtime if p.exists() else 0, reverse=True)
+    if max_files is not None and max_files > 0:
+        return files[:max_files]
+    return files
+
+
+def scan_chat_sessions(max_transcripts=None):
     sessions = []
     for ws in workspace_storage_dirs():
         chat_dirs = [
@@ -2137,7 +2160,11 @@ def scan_chat_sessions():
             if not chat_dir.exists():
                 continue
 
-            for jsonl_file in chat_dir.glob('*.jsonl'):
+            jsonl_files = limited_jsonl_files(
+                chat_dir,
+                max_files=max_transcripts if chat_dir.name == 'transcripts' else None,
+            )
+            for jsonl_file in jsonl_files:
                 session_id = jsonl_file.stem
                 entry = lookup_chat_session_entry(session_id, state_db_path)
                 title = entry.get('title') if isinstance(entry, dict) else None
@@ -2210,7 +2237,7 @@ def scan_md(root):
 # ----------------------------
 # COMMANDS
 # ----------------------------
-def cmd_scan(verbose=True):
+def cmd_scan(verbose=True, include_markdown=False, max_transcripts=None):
     conn = db()
     c = conn.cursor()
 
@@ -2220,10 +2247,15 @@ def cmd_scan(verbose=True):
 
     sessions = []
 
-    # scan various local sources: historical chat sessions, current-session data, and local markdown
-    sessions += scan_chat_sessions()
+    if max_transcripts is None:
+        max_transcripts = env_int("CSR_MAX_TRANSCRIPTS", 80)
+
+    # Scan chat/session state first. Markdown is opt-in because large
+    # repositories can make the "run first" path too slow for agents to trust.
+    sessions += scan_chat_sessions(max_transcripts=max_transcripts)
     sessions += scan_vscode()
-    sessions += scan_md(os.getcwd())
+    if include_markdown or os.getenv("CSR_SCAN_MARKDOWN", "").lower() in ("1", "true", "yes"):
+        sessions += scan_md(os.getcwd())
 
     inserted = 0
     seen = set()
@@ -2246,13 +2278,15 @@ def cmd_scan(verbose=True):
 
     conn.commit()
     if verbose:
-        print(f"[scan] {inserted} sessions indexed ({len(sessions)} found)")
+        scope = "active-workspace" if active_workspace_storage_dirs() and os.getenv("CSR_SCAN_ALL_WORKSPACES", "").lower() not in ("1", "true", "yes") else "all-discovered"
+        md = "with-markdown" if include_markdown else "session-only"
+        print(f"[scan] {inserted} sessions indexed ({len(sessions)} found; {scope}; {md}; max_transcripts={max_transcripts})")
     return inserted, len(sessions)
 
 
 def cmd_search(q, limit=10, sources=None, json_out=False, exact=False, since=None, until=None,
                current_session_only=False, exclude_current_session=False, include_excluded=False,
-               exclude_sessions=None, workspace_only=True):
+               exclude_sessions=None, workspace_only=True, deep=False):
     """Search sessions for query `q`.
     - limit: max results
     - sources: list of source strings to filter (or None)
@@ -2318,8 +2352,9 @@ def cmd_search(q, limit=10, sources=None, json_out=False, exact=False, since=Non
     except Exception:
         pass
 
-    # Fallback to a case-insensitive LIKE search on the content column
-    if len(rows) < candidate_limit:
+    # Fallback to a case-insensitive LIKE search on the content column. This is
+    # intentionally opt-in because it can be slow on large histories.
+    if deep and len(rows) < candidate_limit:
         try:
             params = [qlike]
             sql = """
@@ -2569,23 +2604,6 @@ def get_handoff_candidate_rows(query=None, limit=8, sources=None, workspace_only
         except Exception:
             pass
 
-        try:
-            params = [qlike]
-            sql = """
-            SELECT sessions.id, sessions.source, sessions.path, sessions.chat_session_id, sessions.title, sessions.created_at, coalesce(sessions.display_content, messages.content)
-            FROM messages
-            JOIN sessions ON sessions.id = messages.session_id
-            WHERE lower(messages.content) LIKE ?
-            """
-            sql, params = add_source_filter(sql, params)
-            sql += " ORDER BY sessions.created_at DESC LIMIT ?"
-            params.append(candidate_limit)
-            for row in c.execute(sql, tuple(params)).fetchall():
-                if row[0] not in seen:
-                    rows.append(row)
-                    seen.add(row[0])
-        except Exception:
-            pass
     else:
         try:
             params = []
@@ -2999,7 +3017,9 @@ def main():
     parser.add_argument('--version', action='version', version=f'%(prog)s {__version__}')
     sub = parser.add_subparsers(dest='cmd')
 
-    sub.add_parser('scan', help='scan workspace and index sessions')
+    pscan = sub.add_parser('scan', help='scan workspace and index sessions')
+    pscan.add_argument('--include-markdown', action='store_true', help='also index repository markdown files (slower on large repos)')
+    pscan.add_argument('--max-transcripts', type=int, default=None, help='max recent Copilot transcript JSONL files per transcript directory; 0 means unlimited')
 
     ps = sub.add_parser('search', help='search sessions')
     ps.add_argument('query', nargs='+', help='search query')
@@ -3014,6 +3034,7 @@ def main():
     ps.add_argument('--include-excluded-sessions', action='store_true', help='include sessions from the workspace exclusion block')
     ps.add_argument('--exclude-session', action='append', help='exclude a specific chat session id (repeatable)')
     ps.add_argument('--all-workspaces', action='store_true', help='disable the default current-workspace affinity filter')
+    ps.add_argument('--deep', action='store_true', help='also run slow LIKE fallback over indexed content')
 
     pl = sub.add_parser('list', help='list sessions')
     pl.add_argument('-n', '--limit', type=int, default=20)
@@ -3059,7 +3080,7 @@ def main():
         return
 
     if args.cmd == 'scan':
-        cmd_scan()
+        cmd_scan(include_markdown=args.include_markdown, max_transcripts=args.max_transcripts)
 
     elif args.cmd == 'search':
         q = ' '.join(args.query)
@@ -3077,6 +3098,7 @@ def main():
             include_excluded=args.include_excluded_sessions,
             exclude_sessions=args.exclude_session,
             workspace_only=not args.all_workspaces,
+            deep=args.deep,
         )
 
     elif args.cmd == 'list':
