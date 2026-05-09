@@ -130,6 +130,7 @@ session ids.
 	- `scan` - crawl and index workspace and session stores
 	- `search` - full-text search across indexed records
 	- `list` - list recent indexed sessions
+	- `files` - list recently mentioned or edited files from indexed sessions: `csr files --json --limit 10`
 	- `show` - display a single session
 	- `export` - export sessions or slices
 	- `health` - basic DB/workspaceStorage/workspace check
@@ -145,7 +146,6 @@ session ids.
 	- Docs parity - keep README, `docs/TOOL_DOCUMENTATION.md`, `AGENTS-TEMPLATE.md`, and `csr --help` aligned with actual CLI behavior.
 
 - Roadmap / desirable commands and flags
-	- `files` - list recently touched files with metadata (useful for quick context): `csr files --json --limit 10`
 	- `checkpoints` - list or search named checkpoints across sessions
 	- enhanced `health` - source diagnostics for local datastore, VS Code storage discovery, current workspace/session, parser coverage, and index freshness
 	- `schema-check` - validate DB schema and guide migrations after upgrades

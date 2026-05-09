@@ -31,6 +31,7 @@ Then use targeted CSR commands before broad filesystem tools:
 
 ```bash
 csr list --json --limit 5               # recent sessions
+csr files --json --limit 10             # recently mentioned or edited files
 csr search '<term>' --json              # full-text session search
 csr ask '<question>' --json             # alias for handoff
 csr show <id> --json                    # drill into one session
@@ -47,6 +48,7 @@ If the downstream workspace has a verified wrapper, prefer the short command:
 ./csr handoff '<prompt summary>'        # FIRST command on each prompt
 ./csr handoff                           # use when the prompt is unclear
 ./csr list --json --limit 5
+./csr files --json --limit 10
 ./csr search '<term>' --json
 ./csr ask '<question>' --json
 ./csr show <id> --json
@@ -62,13 +64,14 @@ If no wrapper is available, use the explicit Python command:
 python code-session-recall/csr.py handoff '<prompt summary>'  # FIRST command on each prompt
 python code-session-recall/csr.py handoff                     # use when the prompt is unclear
 python code-session-recall/csr.py list --json --limit 5
+python code-session-recall/csr.py files --json --limit 10
 python code-session-recall/csr.py search '<term>' --json
 python code-session-recall/csr.py ask '<question>' --json
 python code-session-recall/csr.py show <id> --json
 python code-session-recall/csr.py health
 ```
 
-`handoff`, `ask`, and `list` bootstrap an empty local index by running one
+`handoff`, `ask`, `list`, and `files` bootstrap an empty local index by running one
 silent fast scan, so they are safe to use as first recall commands in a fresh
 workspace. The bootstrap scan is session-first: it prefers the active VS Code
 workspace storage, caps transcript history, and skips repository Markdown unless

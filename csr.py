@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 import os, sys, sqlite3, json, hashlib, zlib, argparse, gzip, re
+from urllib.parse import unquote
 from pathlib import Path
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
-__version__ = "0.1.5"
+__version__ = "0.1.6"
 
 try:
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')
@@ -462,7 +463,7 @@ def append_unique_text(target, text):
 
 
 PATH_RE = re.compile(
-    r'(?i)(?:[A-Z]:\\[^\s"<>|]+|/(?:home|users|mnt|var|tmp|etc|opt|workspace|workspaces)/[^\s"<>|]+|/[a-z]/[^\s"<>|]+|[\w./\\-]+\.(?:py|md|json|jsonl|sqlite|vscdb|txt|ps1|sh|ts|tsx|js|jsx|yaml|yml))'
+    r'(?i)(?:[A-Z]:[\\/][^\s"<>|]+|/(?:home|users|mnt|var|tmp|etc|opt|workspace|workspaces)/[^\s"<>|]+|/[a-z]/[^\s"<>|]+|[\w./\\-]+\.(?:py|md|json|jsonl|sqlite|vscdb|txt|ps1|sh|ts|tsx|js|jsx|yaml|yml))'
 )
 COMMAND_RE = re.compile(r'(?i)\b(?:python|py|git|rg|grep|find|Get-ChildItem|Select-String|npm|pnpm|yarn|pytest|pip|uv|csr)\b')
 COMMAND_LINE_RE = re.compile(r'(?i)^\s*`?(?:(?:python|py|git|rg|grep|find|Get-ChildItem|Select-String|npm|pnpm|yarn|pytest|pip|uv)\b|csr\s+[a-z][\w-]*)')
@@ -597,7 +598,8 @@ def is_raw_structured_fact_line(value):
 
 
 def clean_path_candidate(value):
-    text = stringify_text(value).strip().rstrip('.,;:)')
+    text = unquote(stringify_text(value)).strip().rstrip('.,;:)')
+    text = re.sub(r'(?i)^[a-z]+:///([a-z]:[\\/])', r'\1', text)
     if text.endswith('#'):
         return ''
     if not text:
@@ -610,6 +612,12 @@ def clean_path_candidate(value):
     if normalized == cwd:
         return ''
     if re.match(r'^/workspaces/[^/]+$', normalized):
+        return ''
+    if re.match(r'^[A-Z]:/[^/.]+$', normalized, flags=re.I):
+        return ''
+    if re.match(r'^\d+[A-Z]/', normalized, flags=re.I):
+        return ''
+    if 'chat-session-resources' in normalized.lower():
         return ''
     if re.search(r'[#>$]$', normalized):
         return ''
@@ -671,6 +679,7 @@ def collect_uri_paths(obj, out=None, depth=0):
 def extract_paths_from_text(text, limit=30):
     out = []
     for line in stringify_text(text).splitlines():
+        line = unquote(line)
         if is_csr_self_line(line) or is_raw_structured_fact_line(line):
             continue
         for match in PATH_RE.findall(line):
@@ -2681,6 +2690,211 @@ def select_scored_values(values, query=None, limit=8):
     return unique_preserve_order([item[2] for item in scored if item[0] > 0][:limit])
 
 
+DEFAULT_SESSION_SOURCES = ['vscode-copilot', 'vscode-live', 'copilot-artifact']
+
+
+def default_session_sources():
+    return list(DEFAULT_SESSION_SOURCES)
+
+
+def normalize_file_key(path):
+    text = sanitize_handoff_text(clean_path_candidate(path)).strip()
+    if not text:
+        return '', ''
+    normalized = text.replace('\\', '/').rstrip('/')
+    normalized = re.sub(r'/+', '/', normalized)
+    if normalized.startswith('/') and not re.match(r'^/(?:home|users|mnt|var|tmp|etc|opt|workspace|workspaces|[a-z])/', normalized, flags=re.I):
+        return '', ''
+    if not is_probable_file_path(normalized):
+        return '', ''
+    return normalized.lower(), text
+
+
+def is_probable_file_path(path):
+    text = stringify_text(path).strip().rstrip('/')
+    if not text:
+        return False
+    basename = re.split(r'[\\/]', text)[-1]
+    if basename in ('Makefile', 'Dockerfile', 'LICENSE'):
+        return True
+    if re.search(r'\.(?:py|md|json|jsonl|sqlite|vscdb|txt|ps1|sh|ts|tsx|js|jsx|yaml|yml)$', basename, flags=re.I):
+        return True
+    return False
+
+
+def json_payload_from_formatted_content(content):
+    text = stringify_text(content)
+    marker = '----- JSON -----'
+    if marker not in text:
+        return None
+    raw = text.split(marker, 1)[1].strip()
+    if not raw:
+        return None
+    try:
+        return json.loads(raw)
+    except Exception:
+        return None
+
+
+def extract_file_facts_from_content(content):
+    """Return compact (path, reason) facts from already-indexed session text."""
+    pairs = []
+    content = stringify_text(content)
+    payload = json_payload_from_formatted_content(content)
+    if isinstance(payload, dict):
+        facts = payload.get('facts') if isinstance(payload.get('facts'), dict) else {}
+        for path in facts.get('editedFiles') or []:
+            pairs.append((path, 'edited'))
+        for path in facts.get('files') or []:
+            pairs.append((path, 'mentioned'))
+        for item in payload.get('recentRequests') or payload.get('recentUserMessages') or []:
+            if isinstance(item, dict):
+                item_facts = item.get('facts') if isinstance(item.get('facts'), dict) else {}
+                for path in item_facts.get('editedFiles') or []:
+                    pairs.append((path, 'edited'))
+                for path in item_facts.get('files') or []:
+                    pairs.append((path, 'mentioned'))
+
+    section = None
+    for line in content.splitlines():
+        stripped = line.strip()
+        lower = stripped.lower()
+        if stripped == '----- JSON -----':
+            break
+        if not stripped or is_csr_self_line(stripped):
+            continue
+        if lower.startswith('edited files'):
+            section = 'edited'
+            continue
+        if lower.startswith('files mentioned'):
+            section = 'mentioned'
+            continue
+        if re.match(r'^[A-Z][A-Za-z /_-]+:$', stripped):
+            section = None
+        if lower.startswith(('files:', 'file:')):
+            section = 'mentioned'
+        reason = section or ('cwd' if 'cwd=' in lower else 'mentioned')
+        for path in extract_paths_from_text(stripped, limit=12):
+            pairs.append((path, reason))
+
+    # Final fallback catches compact lines that do not live under a fact section.
+    if not pairs:
+        for path in extract_paths_from_text(content, limit=30):
+            pairs.append((path, 'mentioned'))
+    return pairs
+
+
+def file_row_score(row):
+    reason_score = 0
+    reasons = set(row.get('reasons') or [])
+    if 'edited' in reasons:
+        reason_score += 100
+    if 'cwd' in reasons:
+        reason_score -= 10
+    count_score = min(int(row.get('count') or 0), 25) * 4
+    recent_dt = parse_timestamp(row.get('last_seen'))
+    recent_score = int(recent_dt.timestamp()) if recent_dt else 0
+    return (reason_score + count_score, recent_score, row.get('path') or '')
+
+
+def cmd_files(limit=10, sources=None, json_out=False, days=None, workspace_only=True,
+              bootstrap=True):
+    """List recently mentioned or edited files from the local CSR index."""
+    conn = db()
+    c = conn.cursor()
+    effective_sources = sources if sources is not None else default_session_sources()
+    candidate_limit = max(limit * 25, 200)
+
+    def load_rows():
+        params = []
+        sql = (
+            "SELECT sessions.id, sessions.source, sessions.path, sessions.chat_session_id, "
+            "sessions.title, sessions.created_at, coalesce(sessions.display_content, messages.content) "
+            "FROM sessions JOIN messages ON sessions.id = messages.session_id"
+        )
+        if effective_sources:
+            placeholders = ','.join('?' for _ in effective_sources)
+            sql += f" WHERE sessions.source IN ({placeholders})"
+            params.extend(effective_sources)
+        sql += " ORDER BY sessions.created_at DESC LIMIT ?"
+        params.append(candidate_limit)
+        rows = c.execute(sql, tuple(params)).fetchall()
+        rows = apply_workspace_filter(rows, cursor=c, workspace_only=workspace_only)
+        if days is None:
+            return rows
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+        filtered = []
+        for row in rows:
+            created = parse_timestamp(row[5])
+            if created is None or created >= cutoff:
+                filtered.append(row)
+        return filtered
+
+    rows = load_rows()
+    if not rows and bootstrap:
+        cmd_scan(verbose=False)
+        rows = load_rows()
+
+    files = {}
+    for row in rows:
+        sid, source, path, chat_session_id, title, created_at, content = row
+        for raw_path, reason in extract_file_facts_from_content(content or ''):
+            key, clean_path = normalize_file_key(raw_path)
+            if not key:
+                continue
+            entry = files.setdefault(key, {
+                'path': clean_path,
+                'count': 0,
+                'last_seen': None,
+                'sources': [],
+                'reasons': [],
+                'sessions': [],
+            })
+            entry['count'] += 1
+            add_unique_limited(entry['sources'], source, limit=8)
+            add_unique_limited(entry['reasons'], reason, limit=8)
+            current_seen = parse_timestamp(entry.get('last_seen'))
+            row_seen = parse_timestamp(created_at)
+            if entry.get('last_seen') is None or (row_seen and (current_seen is None or row_seen > current_seen)):
+                entry['last_seen'] = created_at
+            session_ref = {
+                'id': sid,
+                'title': sanitize_handoff_text(title),
+                'source': source,
+                'created_at': created_at,
+            }
+            if not any(existing.get('id') == sid for existing in entry['sessions']):
+                entry['sessions'].append(session_ref)
+
+    out = list(files.values())
+    for entry in out:
+        entry['sources'] = sorted(entry['sources'])
+        entry['reasons'] = sorted(entry['reasons'], key=lambda r: (r != 'edited', r))
+        entry['sessions'].sort(key=lambda s: parse_timestamp(s.get('created_at')) or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
+        entry['sessions'] = entry['sessions'][:3]
+    out.sort(key=file_row_score, reverse=True)
+    out = out[:limit]
+
+    if json_out:
+        print(json.dumps(out, ensure_ascii=False, indent=2))
+        return
+
+    if not out:
+        print('No files found in the indexed sessions.')
+        return
+    for entry in out:
+        session_bits = []
+        for session in entry.get('sessions') or []:
+            label = session.get('title') or session.get('id')
+            session_bits.append(f"{label} ({session.get('id')})")
+        print(
+            f"- {entry['path']} "
+            f"(count={entry['count']}; last_seen={entry.get('last_seen') or '-'}; "
+            f"reasons={','.join(entry.get('reasons') or []) or '-'}; "
+            f"sessions={'; '.join(session_bits[:2]) or '-'})"
+        )
+
+
 def cmd_handoff(query=None, limit=5, sources=None, json_out=False, workspace_only=True):
     rows = get_handoff_candidate_rows(query=query, limit=limit, sources=sources, workspace_only=workspace_only)
     if not rows:
@@ -2817,9 +3031,8 @@ def cmd_list(limit=20, sources=None, json_out=False, current_session_only=False,
     c = conn.cursor()
     candidate_limit = max(limit * 8, 80)
     effective_sources = sources
-    default_session_sources = ['vscode-copilot', 'vscode-live', 'copilot-artifact']
     if effective_sources is None:
-        effective_sources = default_session_sources
+        effective_sources = default_session_sources()
 
     def load_rows():
         params = []
@@ -3311,6 +3524,13 @@ def main():
     pl.add_argument('--exclude-session', action='append', help='exclude a specific chat session id (repeatable)')
     pl.add_argument('--all-workspaces', action='store_true', help='disable the default current-workspace affinity filter')
 
+    pf = sub.add_parser('files', help='list recently mentioned or edited files')
+    pf.add_argument('-n', '--limit', type=int, default=10, help='max files')
+    pf.add_argument('-s', '--source', type=str, help='comma-separated sources to filter')
+    pf.add_argument('--json', action='store_true', dest='json_out', help='output JSON')
+    pf.add_argument('--days', type=int, help='only include files from sessions in the last N days')
+    pf.add_argument('--all-workspaces', action='store_true', help='disable the default current-workspace affinity filter')
+
     for command_name, help_text in (
         ('handoff', 'emit compact agent handoff context'),
         ('ask', 'alias for handoff; answer with compact recalled context'),
@@ -3378,6 +3598,16 @@ def main():
             exclude_current_session=args.exclude_current_session,
             include_excluded=args.include_excluded_sessions,
             exclude_sessions=args.exclude_session,
+            workspace_only=not args.all_workspaces,
+        )
+
+    elif args.cmd == 'files':
+        sources = args.source.split(',') if args.source else None
+        cmd_files(
+            limit=args.limit,
+            sources=sources,
+            json_out=args.json_out,
+            days=args.days,
             workspace_only=not args.all_workspaces,
         )
 

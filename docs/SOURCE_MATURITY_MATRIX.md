@@ -75,7 +75,7 @@ derivatives only after local review.
 
 | Area | Status | Target |
 | --- | --- | --- |
-| `files` command | planned | Recent file recall before broad search |
+| `files` command | partial | Recent file recall from indexed session facts before broad search |
 | `--days` filters | planned | Bounded list/search/files/checkpoints queries |
 | Enhanced `health` | partial | Source diagnostics implemented; parser coverage still maturing |
 | `schema-check` | planned | Safe DB/index evolution |

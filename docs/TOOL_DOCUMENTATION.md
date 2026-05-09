@@ -281,13 +281,22 @@ csr install-instructions
 python csr.py install-instructions
 ```
 
-### files (Planned)
-List recently touched files with metadata.
+### files
+List recently mentioned or edited files from indexed sessions. This is an
+index query, not a filesystem crawl, so it can surface container, remote, and
+prior-workspace paths without checking whether they exist on disk now.
 
 ```bash
 python csr.py files --json --limit 10
 python csr.py files --days 7
+python csr.py files --source vscode-copilot --json
+python csr.py files --all-workspaces --json
 ```
+
+By default, `files` applies the current workspace affinity filter and prefers
+session sources such as `vscode-copilot`, `vscode-live`, and
+`copilot-artifact`. Use `--source markdown` only when repository docs were
+indexed and should be included.
 
 ### checkpoints (Planned)
 Search or list named checkpoints across all sessions.
