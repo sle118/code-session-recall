@@ -147,7 +147,7 @@ session ids.
 - Roadmap / desirable commands and flags
 	- `files` - list recently touched files with metadata (useful for quick context): `csr files --json --limit 10`
 	- `checkpoints` - list or search named checkpoints across sessions
-	- enhanced `health` - 8-dimension health check report for the local datastore, VS Code storage discovery, current workspace/session, parser coverage, and index freshness
+	- enhanced `health` - source diagnostics for local datastore, VS Code storage discovery, current workspace/session, parser coverage, and index freshness
 	- `schema-check` - validate DB schema and guide migrations after upgrades
 	- finer `--days N` filtering for `list`, `files`, `search`, `checkpoints` (convenience flag)
 	- source and maturity tracking - keep CSR's deeper VS Code/Copilot extraction while tracking source coverage, normalized facts, Codex/OpenAI discovery, provider diagnostics, trust fencing, real fixtures, and strict performance budgets; see `docs/SOURCE_MATURITY_MATRIX.md`

@@ -297,13 +297,20 @@ python csr.py checkpoints --search "deploy"
 python csr.py checkpoints --session <id>
 ```
 
-### enhanced health (Planned)
-Run an 8-dimension health check on the local datastore and index.
+### enhanced health
+Show local datastore, workspace storage, and source diagnostics.
 
 ```bash
 python csr.py health
+python csr.py health --json
 python csr.py health --verbose
 ```
+
+`health --json` is the preferred agent-readable diagnostic surface. It reports
+`db_path`, current workspace, `PYTHONSTARTUP` workspace when available,
+workspace storage directories, and a `sources[]` array with source id, status,
+discovered count, indexed count, and notes. Verbose mode includes sanitized
+discovered paths and keys.
 
 ### schema-check (Planned)
 Validate database schema and guide migrations after upgrades.
@@ -333,7 +340,8 @@ maturity in `docs/SOURCE_MATURITY_MATRIX.md`.
 
 Planned maturity work:
 - Provider/source diagnostics for `chatSessions`, transcript streams,
-  `state.vscdb`, todo state, agent session state, and markdown.
+  `state.vscdb`, todo state, agent session state, and markdown. First pass is
+  implemented in `csr health`.
 - Trust fencing for file-backed/untrusted content before it is shown to agents.
 - Fixture tests for real observed VS Code/Copilot storage shapes, using
   sanitized samples only.

@@ -77,7 +77,7 @@ derivatives only after local review.
 | --- | --- | --- |
 | `files` command | planned | Recent file recall before broad search |
 | `--days` filters | planned | Bounded list/search/files/checkpoints queries |
-| Enhanced `health` | planned | Source diagnostics and parser coverage |
+| Enhanced `health` | partial | Source diagnostics implemented; parser coverage still maturing |
 | `schema-check` | planned | Safe DB/index evolution |
 | Trust fencing | planned | Mark file-backed/untrusted content in agent output |
 | Sanitized fixtures | planned | Real observed VS Code shapes without local leaks |

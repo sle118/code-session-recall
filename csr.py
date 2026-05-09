@@ -2939,18 +2939,283 @@ def cmd_export(current_session_only=False, exclude_current_session=False,
     print(msg[0])
 
 
-def cmd_health():
-    startup_workspace = workspace_dir_from_pythonstartup()
+def indexed_session_count(where_sql=None, params=None):
+    try:
+        conn = db()
+        c = conn.cursor()
+        sql = "SELECT count(*) FROM sessions"
+        if where_sql:
+            sql += " WHERE " + where_sql
+        row = c.execute(sql, tuple(params or [])).fetchone()
+        return int(row[0] or 0)
+    except Exception:
+        return 0
 
-    print("DB:", sanitize_handoff_text(DB_PATH))
-    print("Workspace:", sanitize_handoff_text(os.getcwd()))
-    print("PYTHONSTARTUP workspace:", sanitize_handoff_text(startup_workspace) if startup_workspace else "-")
+
+def state_key_inventory(workspace_dirs):
+    inventory = {
+        'state_db_paths': [],
+        'key_counts': {},
+        'key_paths': {},
+        'errors': [],
+    }
+    watched = {
+        'memento_interactive_session': lambda key: key == 'memento/interactive-session',
+        'memento_chat_todo_list': lambda key: 'memento/chat-todo-list' in key,
+        'agent_sessions_model_cache': lambda key: 'agentsessions.model.cache' in key,
+        'agent_sessions_state_cache': lambda key: 'agentsessions.state.cache' in key,
+        'codex_chatgpt_ui_state': lambda key: (
+            'codex' in key
+            or 'chatgpt' in key
+            or key.startswith('memento/webviewview.chatgpt')
+        ),
+    }
+    for source_id in watched:
+        inventory['key_counts'][source_id] = 0
+        inventory['key_paths'][source_id] = []
+
+    for workspace_dir in workspace_dirs:
+        dbfile = Path(workspace_dir) / 'state.vscdb'
+        if not dbfile.exists():
+            continue
+        inventory['state_db_paths'].append(str(dbfile))
+        try:
+            conn = sqlite3.connect(dbfile)
+            rows = conn.execute("SELECT key FROM ItemTable").fetchall()
+        except Exception as exc:
+            inventory['errors'].append(f"{dbfile}: {type(exc).__name__}")
+            continue
+        for (key,) in rows:
+            lk = stringify_text(key).lower()
+            for source_id, matcher in watched.items():
+                if matcher(lk):
+                    inventory['key_counts'][source_id] += 1
+                    if len(inventory['key_paths'][source_id]) < 12:
+                        inventory['key_paths'][source_id].append(f"{dbfile}::{key}")
+    return inventory
+
+
+def count_jsonl_under(workspace_dirs, relative_parts):
+    count = 0
+    paths = []
+    for workspace_dir in workspace_dirs:
+        folder = Path(workspace_dir).joinpath(*relative_parts)
+        if not folder.exists():
+            continue
+        try:
+            files = [path for path in folder.glob('*.jsonl') if path.is_file()]
+        except Exception:
+            continue
+        count += len(files)
+        for path in files[:12 - len(paths)]:
+            paths.append(str(path))
+    return count, paths
+
+
+def source_status(discovered_count, indexed_count=0, opt_in=False, planned_only=False):
+    if opt_in:
+        return 'opt_in'
+    if planned_only and discovered_count > 0:
+        return 'present_not_indexed'
+    if discovered_count > 0 and indexed_count > 0:
+        return 'ok'
+    if discovered_count > 0:
+        return 'present_not_indexed'
+    return 'missing'
+
+
+def collect_health():
+    startup_workspace = workspace_dir_from_pythonstartup()
+    workspace_dirs = workspace_storage_dirs()
+    state_inventory = state_key_inventory(workspace_dirs)
+    chat_count, chat_paths = count_jsonl_under(workspace_dirs, ['chatSessions'])
+    transcript_count, transcript_paths = count_jsonl_under(workspace_dirs, ['GitHub.copilot-chat', 'transcripts'])
+
+    indexed = {
+        'chat_sessions': indexed_session_count(
+            "source='vscode-copilot' AND lower(path) LIKE '%chatsessions%'"
+        ),
+        'copilot_transcripts': indexed_session_count(
+            "source='vscode-copilot' AND lower(path) LIKE '%github.copilot-chat%transcripts%'"
+        ),
+        'vscode_live': indexed_session_count("source='vscode-live'"),
+        'memento_interactive_session': indexed_session_count(
+            "source='vscode-live' AND path LIKE ?",
+            ['%::memento/interactive-session'],
+        ),
+        'memento_chat_todo_list': indexed_session_count(
+            "source='vscode-live' AND lower(path) LIKE ?",
+            ['%memento/chat-todo-list%'],
+        ),
+        'agent_sessions_model_cache': indexed_session_count(
+            "source='vscode-live' AND lower(path) LIKE ?",
+            ['%agentsessions.model.cache%'],
+        ),
+        'agent_sessions_state_cache': indexed_session_count(
+            "source='vscode-live' AND lower(path) LIKE ?",
+            ['%agentsessions.state.cache%'],
+        ),
+        'markdown': indexed_session_count("source='markdown'"),
+    }
+
+    sources = [
+        {
+            'id': 'workspaceStorage',
+            'status': 'ok' if workspace_dirs else 'missing',
+            'discovered_count': len(workspace_dirs),
+            'indexed_count': 0,
+            'notes': 'VS Code workspace storage directories discovered',
+            'details': [str(path) for path in workspace_dirs[:20]],
+        },
+        {
+            'id': 'state.vscdb',
+            'status': 'ok' if state_inventory['state_db_paths'] else 'missing',
+            'discovered_count': len(state_inventory['state_db_paths']),
+            'indexed_count': indexed['vscode_live'],
+            'notes': 'VS Code state databases scanned for selected keys',
+            'details': state_inventory['state_db_paths'][:20],
+        },
+        {
+            'id': 'chatSessions/*.jsonl',
+            'status': source_status(chat_count, indexed['chat_sessions']),
+            'discovered_count': chat_count,
+            'indexed_count': indexed['chat_sessions'],
+            'notes': 'Legacy VS Code Copilot chat session JSONL files',
+            'details': chat_paths,
+        },
+        {
+            'id': 'GitHub.copilot-chat/transcripts/*.jsonl',
+            'status': source_status(transcript_count, indexed['copilot_transcripts']),
+            'discovered_count': transcript_count,
+            'indexed_count': indexed['copilot_transcripts'],
+            'notes': 'Newer VS Code/Copilot transcript streams',
+            'details': transcript_paths,
+        },
+        {
+            'id': 'memento/interactive-session',
+            'status': source_status(
+                state_inventory['key_counts']['memento_interactive_session'],
+                indexed['memento_interactive_session'],
+            ),
+            'discovered_count': state_inventory['key_counts']['memento_interactive_session'],
+            'indexed_count': indexed['memento_interactive_session'],
+            'notes': 'Interactive prompt trail state',
+            'details': state_inventory['key_paths']['memento_interactive_session'],
+        },
+        {
+            'id': 'memento/chat-todo-list',
+            'status': source_status(
+                state_inventory['key_counts']['memento_chat_todo_list'],
+                indexed['memento_chat_todo_list'],
+            ),
+            'discovered_count': state_inventory['key_counts']['memento_chat_todo_list'],
+            'indexed_count': indexed['memento_chat_todo_list'],
+            'notes': 'Copilot todo/next-step state',
+            'details': state_inventory['key_paths']['memento_chat_todo_list'],
+        },
+        {
+            'id': 'agentSessions.model.cache',
+            'status': source_status(
+                state_inventory['key_counts']['agent_sessions_model_cache'],
+                indexed['agent_sessions_model_cache'],
+            ),
+            'discovered_count': state_inventory['key_counts']['agent_sessions_model_cache'],
+            'indexed_count': indexed['agent_sessions_model_cache'],
+            'notes': 'Agent/subagent model summaries; likely first Codex/OpenAI source',
+            'details': state_inventory['key_paths']['agent_sessions_model_cache'],
+        },
+        {
+            'id': 'agentSessions.state.cache',
+            'status': source_status(
+                state_inventory['key_counts']['agent_sessions_state_cache'],
+                indexed['agent_sessions_state_cache'],
+                planned_only=True,
+            ),
+            'discovered_count': state_inventory['key_counts']['agent_sessions_state_cache'],
+            'indexed_count': indexed['agent_sessions_state_cache'],
+            'notes': 'Observed as resource/read-state markers; planned, not indexed',
+            'details': state_inventory['key_paths']['agent_sessions_state_cache'],
+        },
+        {
+            'id': 'codex/chatgpt-ui-state',
+            'status': source_status(
+                state_inventory['key_counts']['codex_chatgpt_ui_state'],
+                0,
+                planned_only=True,
+            ),
+            'discovered_count': state_inventory['key_counts']['codex_chatgpt_ui_state'],
+            'indexed_count': 0,
+            'notes': 'Codex/ChatGPT workbench or webview UI state; low priority unless session-bearing',
+            'details': state_inventory['key_paths']['codex_chatgpt_ui_state'],
+        },
+        {
+            'id': 'markdown',
+            'status': 'opt_in',
+            'discovered_count': 0,
+            'indexed_count': indexed['markdown'],
+            'notes': 'Repository markdown indexing is opt-in via scan --include-markdown or CSR_SCAN_MARKDOWN=1',
+            'details': [],
+        },
+    ]
+
+    return {
+        'db_path': str(DB_PATH),
+        'workspace': os.getcwd(),
+        'pythonstartup_workspace': str(startup_workspace) if startup_workspace else None,
+        'workspace_storage_dirs': [str(path) for path in workspace_dirs],
+        'sources': sources,
+        'errors': state_inventory['errors'],
+    }
+
+
+def sanitize_health_payload(value, verbose=False):
+    if isinstance(value, dict):
+        out = {}
+        for key, item in value.items():
+            if key == 'details' and not verbose:
+                continue
+            out[key] = sanitize_health_payload(item, verbose=verbose)
+        return out
+    if isinstance(value, list):
+        return [sanitize_health_payload(item, verbose=verbose) for item in value]
+    if value is None:
+        return None
+    if isinstance(value, (bool, int, float)):
+        return value
+    return sanitize_handoff_text(value)
+
+
+def cmd_health(json_out=False, verbose=False):
+    health = collect_health()
+    sanitized = sanitize_health_payload(health, verbose=verbose)
+    if json_out:
+        print(json.dumps(sanitized, ensure_ascii=False, indent=2))
+        return
+
+    print("DB:", sanitized['db_path'])
+    print("Workspace:", sanitized['workspace'])
+    print("PYTHONSTARTUP workspace:", sanitized['pythonstartup_workspace'] or "-")
     print("VS Code workspace dirs:")
-    dirs = workspace_storage_dirs()
+    dirs = sanitized['workspace_storage_dirs']
     if not dirs:
         print("- none found")
     for path in dirs[:20]:
-        print("-", sanitize_handoff_text(path))
+        print("-", path)
+    print("Sources:")
+    for source in sanitized['sources']:
+        print(
+            f"- {source['id']}: {source['status']} "
+            f"(discovered={source['discovered_count']}; indexed={source['indexed_count']})"
+        )
+        if source.get('notes'):
+            print(f"  notes: {source['notes']}")
+        if verbose and source.get('details'):
+            for detail in source['details'][:20]:
+                print(f"  - {detail}")
+    if sanitized.get('errors'):
+        print("Errors:")
+        for error in sanitized['errors'][:20]:
+            print("-", error)
 
 
 def cmd_install_instructions():
@@ -3070,7 +3335,9 @@ def main():
     pexport.add_argument('--exclude-current-session', action='store_true', help='exclude the configured current workspace chat session')
     pexport.add_argument('--include-excluded-sessions', action='store_true', help='include sessions from the workspace exclusion block')
     pexport.add_argument('--exclude-session', action='append', help='exclude a specific chat session id (repeatable)')
-    sub.add_parser('health', help='show health info')
+    phealth = sub.add_parser('health', help='show health info')
+    phealth.add_argument('--json', action='store_true', dest='json_out', help='output JSON')
+    phealth.add_argument('--verbose', action='store_true', help='include sanitized discovered paths and keys')
     sub.add_parser('install-instructions', help='print agent bootstrap instructions for installing/activating csr')
 
     args = parser.parse_args()
@@ -3171,7 +3438,7 @@ def main():
         )
 
     elif args.cmd == 'health':
-        cmd_health()
+        cmd_health(json_out=args.json_out, verbose=args.verbose)
 
     elif args.cmd == 'install-instructions':
         cmd_install_instructions()
