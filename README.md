@@ -150,6 +150,7 @@ session ids.
 	- enhanced `health` - 8-dimension health check report for the local datastore, VS Code storage discovery, current workspace/session, parser coverage, and index freshness
 	- `schema-check` - validate DB schema and guide migrations after upgrades
 	- finer `--days N` filtering for `list`, `files`, `search`, `checkpoints` (convenience flag)
+	- source and maturity tracking - keep CSR's deeper VS Code/Copilot extraction while tracking source coverage, normalized facts, Codex/OpenAI discovery, provider diagnostics, trust fencing, real fixtures, and strict performance budgets; see `docs/SOURCE_MATURITY_MATRIX.md`
 
 Notes and conventions
 - We intentionally keep sample data and temporary investigation outputs out of version control by default; see `.gitignore`.

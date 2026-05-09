@@ -43,6 +43,15 @@ To inspect nested structure without printing raw values or dynamic session ids:
 python tools/exploratory/key_census.py --shape --match memento/chat-todo-list --match agentSessions --match chat.terminalSessions --limit 20
 ```
 
+For Codex/OpenAI discovery, use a targeted privacy-safe census:
+
+```powershell
+python tools/exploratory/key_census.py --shape --match codex --match openai --match chatgpt --match agentSessions --limit 40
+```
+
+Update `docs/SOURCE_MATURITY_MATRIX.md` with sanitized findings before adding a
+new formatter or source.
+
 ## What To Look For
 
 Prioritize keys that are frequent or high-signal:
@@ -53,6 +62,15 @@ Prioritize keys that are frequent or high-signal:
   compact formatter and is indexed as `vscode-live`.
 - `agentSessions.model.cache` - agent/subagent labels, status, timing, and
   change counts; now has a compact formatter and is indexed as `vscode-live`.
+- `agentSessions.state.cache` - possible agent/session state; inspect with
+  Codex/OpenAI census before indexing. Initial sanitized census showed mainly
+  `resource` plus read-state markers.
+- `memento/webviewView.chatgpt.sidebarSecondaryView` - possible ChatGPT/Codex
+  webview state; initial sanitized census showed empty object state, so this is
+  lower priority than agent session cache.
+- `workbench.view.extension.codexSecondaryViewContainer.*` - Codex UI/view
+  state; initial sanitized census showed visibility/layout state, so treat as
+  low priority unless it links to useful session state.
 - `terminal.integrated.bufferState` - possible terminal output and command
   recovery signal.
 - `chat.terminalSessions` and `terminalChat.toolSessionMappings` - possible

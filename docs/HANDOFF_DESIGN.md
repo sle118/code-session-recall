@@ -146,6 +146,25 @@ content `LIKE` fallback, `scan --include-markdown` indexes repository Markdown,
 `CSR_SCAN_ALL_WORKSPACES=1` allows scanning every discovered VS Code workspace
 storage directory.
 
+## Maturity Track
+
+CSR should keep its deeper VS Code/Copilot extraction advantage while borrowing
+product discipline from auto-memory-style recall tools. Keep these hardening
+items visible when planning new work:
+
+- Source coverage and maturity status are tracked in
+  `docs/SOURCE_MATURITY_MATRIX.md`.
+- Provider/source diagnostics for each storage surface: `chatSessions`,
+  transcript streams, `state.vscdb`, todo state, agent session state, markdown.
+- Trust fencing for file-backed or untrusted content before it reaches agent
+  prompts.
+- Sanitized fixture tests for real observed VS Code/Copilot JSONL and state
+  shapes.
+- Performance budgets for first-step commands: `handoff`, `ask`, `list`, and
+  empty-index bootstrap scans.
+- Continued path normalization and noise suppression so handoff output stays
+  compact and operational.
+
 ## Compression Heuristics
 
 The compressor should score lines higher when they contain:

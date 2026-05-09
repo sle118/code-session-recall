@@ -81,6 +81,11 @@ Keep recall cheap enough that agents will actually use it. Use `csr search
 repository docs should be indexed, and `CSR_SCAN_ALL_WORKSPACES=1` only for
 intentional cross-workspace recall.
 
+When CSR behavior changes, keep `AGENTS-TEMPLATE.md`,
+`docs/TOOL_DOCUMENTATION.md`, and `docs/SOURCE_MATURITY_MATRIX.md` aligned. The
+matrix tracks source coverage, normalized facts, Codex/OpenAI discovery, and
+product maturity.
+
 CSR filters terminal/tool invocations of `csr` itself so command output from
 recall operations does not feed back into future recall packets.
 

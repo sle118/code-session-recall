@@ -324,6 +324,23 @@ python csr.py files --days 7
 python csr.py checkpoints --days 3
 ```
 
+### maturity track (Planned)
+Keep CSR's deeper VS Code/Copilot extraction while hardening the product surface
+that makes agents trust and reuse it.
+
+Track source coverage, normalized facts, Codex/OpenAI discovery, and product
+maturity in `docs/SOURCE_MATURITY_MATRIX.md`.
+
+Planned maturity work:
+- Provider/source diagnostics for `chatSessions`, transcript streams,
+  `state.vscdb`, todo state, agent session state, and markdown.
+- Trust fencing for file-backed/untrusted content before it is shown to agents.
+- Fixture tests for real observed VS Code/Copilot storage shapes, using
+  sanitized samples only.
+- Performance budgets for "run first" commands such as `handoff`, `ask`,
+  `list`, and bootstrap scans.
+- Better path normalization and noise suppression in handoff output.
+
 ## Architecture & Design
 
 ### Storage
